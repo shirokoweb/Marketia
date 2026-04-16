@@ -1,0 +1,68 @@
+{
+    "guide": {
+        "title": "Developing Market Research Applications with Gemini Deep Research",
+        "overview": "Gemini Deep Research is a specialized agent available via the Google Gen AI 'Interactions API'.[[1](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQFb2FQmzZpLlfEFbtWcMIfqjlKxGroR0KPjt0DL4ltfHoxr2cAXyR9KA9LhWwY9R0SDXJBfkwYPY6TF4xm-1kccTmwDAqMb8uhUmEmxXguvGbxV0G-rPaVdS4LqgKTDUpR8fLvVVg3jkTMcDiX0tNsNv4T6wNsFO1NxChRGrvMqjHmz5o8%3D)][[2](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQG2_rAwQRmjciWhL_tu8jHvnT7Ek-IXTKNM1GmE65aC171wu_UwxNjukfeNJwSOKtX5G_B-ht619KgrDMWzevFRoAIfaO0nUCi9sT5aGOArHomEye5jcvUfWxXosNwOmJp5T9LFf55XlRNGdS04ZyHYHHoDVemi)] Unlike standard models, it autonomously plans, executes multi-step web searches, reads content, and synthesizes detailed reports, making it ideal for deep market research tasks like competitor analysis, trend forecasting, and due diligence.",
+        "prerequisites": [
+            "Google AI Studio API Key",
+            "Python 3.9+",
+            "Google Gen AI SDK (v0.1.0 or later)"
+        ],
+        "steps": [
+            {
+                "step": 1,
+                "action": "Install/Update SDK",
+                "command": "pip install -U google-genai",
+                "description": "Ensure you have the latest version of the SDK that supports the Interactions API."
+            },
+            {
+                "step": 2,
+                "action": "Initialize Client",
+                "code_snippet": "from google import genai\nclient = genai.Client(api_key='YOUR_API_KEY')",
+                "description": "Authenticate using your API key."[
+                    [
+                        1
+                    ](https: //www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQFb2FQmzZpLlfEFbtWcMIfqjlKxGroR0KPjt0DL4ltfHoxr2cAXyR9KA9LhWwY9R0SDXJBfkwYPY6TF4xm-1kccTmwDAqMb8uhUmEmxXguvGbxV0G-rPaVdS4LqgKTDUpR8fLvVVg3jkTMcDiX0tNsNv4T6wNsFO1NxChRGrvMqjHmz5o8%3D)][[2](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQG2_rAwQRmjciWhL_tu8jHvnT7Ek-IXTKNM1GmE65aC171wu_UwxNjukfeNJwSOKtX5G_B-ht619KgrDMWzevFRoAIfaO0nUCi9sT5aGOArHomEye5jcvUfWxXosNwOmJp5T9LFf55XlRNGdS04ZyHYHHoDVemi)][[3](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQFpUqHvrf4KPMittmb2OL7OK0nrgZ4e2VGH9xfGTKiabawkqzobgU7IFi5uXE1LYJ0VR59a5gyHj3lXANch4He-XN2lDVp8nJKVdlyRKfKKz9DtFCHdpXLOLGSTHOc8JwH0S2Ty09Stz-jsYaZ5NjyAksEjoT-m_mRY6QHI8XFKoSsvXWnMiJWPIL1sqaaKwCw9npupY1VynwB2jHw2SxfPqSRTL0EKUg%3D%3D)][[4](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQHBph4AtEf-gwOBKfbCDj8VQlqGdN3PtNCMr_EeRNOzNzJdfQgds7poik0lmqzzBikrwRMClw8tZyv0LaxOVHXSgPgAsdCks7Y16FAt54q1PLsSwF81Ivloti9EK-DdIoEj9aznIdrIMWWEShPdliyQFvzy_g%3D%3D)][[5](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQEW1pid-tWhbZodbbuAc3Ho60Ch10HgyA58PTcFP-OxXNQnC3XjP81wNWVvzBXdmmYG2EUHuP6NIflpeb-5dulYlqDTPL7t5TxyF091IRbOOT_FkXMjD6ELtYPSyYsL7e1D3XAqvf-du9oeb0xZkXY31xCe4k0iXNmKz46YW4rPWc3thMKJzHYjixMEUey20vGkl-x8LiFA)][[6](https://www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQFiGncVVLheSPOANsq1u7vKBPUTofRWJtRgbCh9Vgg_zEVREey0pY_kVx7CGfpqPrILcqY3Ubk15ZTvXjwJmVdJCgFL2MNMX4Z1obh_ZHgL3iJ-_rw%3D)]
+                },
+                {
+                    "step": 3,
+                    "action": "Define Market Research Prompt",
+                    "tips": [
+                        "Be specific about the industry and region.",
+                        "Request structured sections (e.g., 'Market Size', 'Key Competitors', 'SWOT Analysis').",
+                        "Ask for citations."
+                    ],
+                    "example_prompt": "Conduct a comprehensive market research report on the electric bicycle market in Europe for 2025. Include current market size, projected growth, key competitors (both established and startups), and regulatory headwinds. format the output as a detailed report with citations."
+                },
+                {
+                    "step": 4,
+                    "action": "Execute Research Task",
+                    "details": "Deep Research is a long-running process (can take minutes). You must run it asynchronously using `background=True`.",
+                    "code_snippet": "interaction = client.interactions.create(\n    agent='deep-research-pro-preview-12-2025',\n    input='Your market research prompt here...',\n    background=True\n)\nprint(f'Research started with ID: {interaction.id}')"
+                },
+                {
+                    "step": 5,
+                    "action": "Poll for Results",
+                    "details": "Since the task runs in the background, you need to loop and check the status until it is 'completed'.",
+                    "code_snippet": "import time\n\nwhile True:\n    interaction = client.interactions.get(interaction.id)\n    if interaction.status == 'completed':\n        print(interaction.outputs[-1].text)\n        break\n    elif interaction.status == 'failed':\n        print(f'Error: {interaction.error}')\n        break\n    print('Researching...')\n    time.sleep(10)"
+                }
+            ],
+            "advanced_features": {
+                "upload_own_data": {
+                    "description": "Upload internal PDFs or CSVs (e.g., previous sales data) to combine public web info with internal knowledge.",
+                    "method": "Use the File API to upload documents and pass them to the agent using the `file_search` tool configuration (if supported in your specific preview version) or context."
+                },
+                "streaming": {
+                    "description": "Receive real-time updates on the agent's thought process.",
+                    "configuration": "Set `stream=True` and `background=True` in the create call."
+                }[
+                    [
+                        7
+                    ](https: //www.google.com/url?sa=E&q=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fgrounding-api-redirect%2FAUZIYQHt_YHTm_WgWQM6TfjLf2IPRgRwMVIrFVjHN4eOyuEhEmKc8dl4n4IdaXWXDleSJJxwOHDnJP0QtHYKGandouVCoQGfVfr3NTNZzxWmNj5dwu8dK4VoWSorjucUZGy44lLLNA_4X0V0YztkFK1jBQ%3D%3D)]
+                },
+                "best_practices": [
+                    "Use 'Interactions API' specifically, not 'generate_content'.",
+                    "Handle timeouts gracefully; deep research can take 5-10 minutes.",
+                    "Review citations provided in the final report to verify data accuracy."
+                ]
+            }
+        }
