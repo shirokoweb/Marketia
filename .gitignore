@@ -1,5 +1,50 @@
+# Environment
 .env
-.DS_Store
+.env.local
+.env.*.local
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-local
+.claude/
 backups/
+
+# Dev artifacts (never commit)
+debug_interaction.txt
+test-report-*.md
+
+# Generated reports (user output; stay local)
+research_report.md
+followup_report.md
+market_research_report_*.md
+followup_report_*.md

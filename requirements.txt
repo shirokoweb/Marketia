@@ -1,4 +1,6 @@
-google-genai
-python-dotenv
-streamlit
-pyyaml
+# Direct dependencies for Marketia. Versions captured 2026-04-16.
+# For development: `pip install -e ".[dev]"` (uses pyproject.toml).
+google-genai==1.47.0
+streamlit==1.50.0
+python-dotenv==1.2.1
+PyYAML==6.0.3
