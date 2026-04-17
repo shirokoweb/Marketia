@@ -17,6 +17,7 @@ venv/
 .venv/
 env/
 .env/
+.venv310/
 
 # Caches
 .ruff_cache/
