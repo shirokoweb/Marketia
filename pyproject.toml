@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketia"
+version = "0.2.0"
+description = "Streamlit + CLI front-end for Google's Gemini Deep Research Agent."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "shirokoweb" }]
+keywords = ["gemini", "deep-research", "market-research", "streamlit", "google-genai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "google-genai>=1.47.0,<2.0",
+    "streamlit>=1.50.0,<2.0",
+    "python-dotenv>=1.2.0,<2.0",
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "pre-commit>=3.5.0",
+]
+
+[project.scripts]
+marketia-research = "cli.research:main"
+marketia-followup = "cli.followup:main"
+
+[project.urls]
+Homepage = "https://github.com/shirokoweb/marketia"
+Issues = "https://github.com/shirokoweb/marketia/issues"
+
+[tool.setuptools.packages.find]
+include = ["marketia*", "cli*"]
+exclude = ["venv*", "tests*", "backups*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "PL",  # pylint
+]
+ignore = [
+    "PLR0913", # too many arguments — we have functions with sensible named parameters
+    "PLR2004", # magic value comparison — noisy for small domain constants
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit tabs and CLI mains use early-return control flow; the "too many
+# returns/statements" rules add no value here.
+"marketia/ui/tabs.py" = ["PLR0911", "PLR0915"]
+"cli/*.py" = ["PLR0911", "PLR0915"]
+
+[tool.ruff.format]
+# Defaults (compatible with Black).
