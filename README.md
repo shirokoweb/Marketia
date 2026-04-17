@@ -14,7 +14,7 @@ Marketia wraps the `deep-research-pro-preview-12-2025` agent with a clean UI and
 
 Deep Research is an **agentic** Gemini model: one call autonomously plans, runs multi-step web searches, reads pages, and synthesizes a detailed report. See Google's [Deep Research model page](https://ai.google.dev/gemini-api/docs/models). Unlike a single-shot LLM call, a research task runs in the background and must be polled to completion.
 
-> **Cost & latency warning.** A single research call typically processes hundreds of thousands of tokens and takes **5–10+ minutes**. Pricing at the time of writing is $1–2 per 1M input tokens and $6–9 per 1M output tokens — expect **several USD per report**. Keep your prompts focused.
+> **Cost & latency warning.** A single research call typically processes hundreds of thousands of tokens and takes **5–10+ minutes**. Pricing at the time of writing is $1–2 per 1M input tokens and $6–9 per 1M output tokens — expect **several USD per report**. Keep your prompts focused. Please refer to [Google's pricing page](https://ai.google.dev/gemini-api/docs/pricing) for the latest pricing information.
 
 ---
 
