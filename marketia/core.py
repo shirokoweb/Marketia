@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -18,18 +19,35 @@ from google import genai
 
 logger = logging.getLogger("marketia")
 
-# Model IDs — verified active at https://ai.google.dev/gemini-api/docs/models on 2026-04-16.
-RESEARCH_MODEL = "deep-research-pro-preview-12-2025"
+# Model IDs — verified against https://ai.google.dev/gemini-api/docs/deep-research on 2026-04-24.
+RESEARCH_MODEL_FAST = "deep-research-preview-04-2026"
+RESEARCH_MODEL_MAX = "deep-research-max-preview-04-2026"
 FLASH_MODEL = "gemini-2.5-flash-lite"
+
+# base agent_config required by every Deep Research call (type key is mandatory per docs).
+_AGENT_CONFIG_BASE: dict[str, Any] = {"type": "deep-research"}
 
 # Pricing tiers for RESEARCH_MODEL (USD per 1M tokens).
 _INPUT_RATE_LOW, _INPUT_RATE_HIGH = 1.00, 2.00
 _OUTPUT_RATE_LOW, _OUTPUT_RATE_HIGH = 6.00, 9.00
 _TIER_BOUNDARY_TOKENS = 200_000
 
-# Terminal API statuses reported by `interaction.status`.
+# Known API statuses reported by `interaction.status`.
 _STATUS_COMPLETED = "completed"
 _STATUS_FAILED = "failed"
+_STATUS_IN_PROGRESS = "in_progress"
+
+
+def __getattr__(name: str) -> Any:
+    if name == "RESEARCH_MODEL":
+        warnings.warn(
+            "RESEARCH_MODEL is deprecated and will be removed in a future release. "
+            "Use RESEARCH_MODEL_FAST or RESEARCH_MODEL_MAX instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return RESEARCH_MODEL_FAST
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class MissingAPIKeyError(RuntimeError):
@@ -123,7 +141,7 @@ def run_research(
     client: genai.Client,
     prompt: str,
     *,
-    model: str = RESEARCH_MODEL,
+    agent: str = RESEARCH_MODEL_FAST,
     on_status: StatusCallback | None = None,
     poll_interval: float = 5.0,
     timeout: float = 30 * 60,
@@ -133,7 +151,7 @@ def run_research(
     Args:
         client: An authenticated ``genai.Client``.
         prompt: The research prompt to submit.
-        model: Model ID; defaults to the current deep-research preview.
+        agent: Agent model ID; defaults to the fast deep-research model.
         on_status: Optional callback invoked on each poll with
             ``(status_string, elapsed_seconds)``. Use for honest progress UX.
         poll_interval: Seconds between status polls.
@@ -146,8 +164,8 @@ def run_research(
         ResearchFailedError: If the API reports a failed status.
         ResearchTimeoutError: If the interaction exceeds ``timeout`` seconds.
     """
-    interaction = client.interactions.create(agent=model, input=prompt, background=True)
-    logger.info("Research interaction started: id=%s model=%s", interaction.id, model)
+    interaction = client.interactions.create(agent=agent, input=prompt, background=True)
+    logger.info("Research interaction started: id=%s agent=%s", interaction.id, agent)
     start = time.time()
 
     while True:
@@ -164,6 +182,8 @@ def run_research(
         if status == _STATUS_FAILED:
             error = getattr(interaction, "error", "unknown error")
             raise ResearchFailedError(f"Research failed: {error}")
+        if status not in (_STATUS_IN_PROGRESS, _STATUS_COMPLETED, _STATUS_FAILED):
+            logger.warning("Unexpected interaction status %r; continuing to poll", status)
         if elapsed > timeout:
             raise ResearchTimeoutError(
                 f"Research did not complete within {timeout:.0f}s (id={interaction.id})"

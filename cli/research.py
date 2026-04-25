@@ -16,6 +16,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from marketia.core import (
+    RESEARCH_MODEL_FAST,
+    RESEARCH_MODEL_MAX,
     MissingAPIKeyError,
     ResearchFailedError,
     ResearchTimeoutError,
@@ -64,6 +66,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip AI-generated tags (useful with --title).",
     )
     parser.add_argument(
+        "--mode",
+        choices=["fast", "max"],
+        default="fast",
+        help=(
+            "Agent speed: 'fast' (~$1-3, default) or 'max' (~$3-7, more comprehensive). "
+            "Maps to the April-2026 deep-research model variants."
+        ),
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -102,9 +113,11 @@ def main() -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    agent_model = RESEARCH_MODEL_MAX if args.mode == "max" else RESEARCH_MODEL_FAST
     print(f"Starting research for: {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
+    print(f"Mode: {args.mode} ({agent_model})")
     try:
-        interaction = run_research(client, prompt, on_status=_on_status)
+        interaction = run_research(client, prompt, agent=agent_model, on_status=_on_status)
     except ResearchFailedError as exc:
         print(f"\n{exc}", file=sys.stderr)
         return 1

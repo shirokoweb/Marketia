@@ -9,7 +9,7 @@ from typing import Any
 import streamlit as st
 
 from marketia.core import (
-    RESEARCH_MODEL,
+    RESEARCH_MODEL_FAST,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
@@ -55,7 +55,7 @@ def _make_status_writer(status: Any) -> Any:
     return on_status
 
 
-def new_research_tab(client: Any, output_dir: str) -> None:
+def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
     """Render the 'New Research' tab."""
     st.subheader("Launch New Deep Research Task")
 
@@ -92,7 +92,7 @@ def new_research_tab(client: Any, output_dir: str) -> None:
             interaction = run_research(
                 client,
                 research_prompt,
-                model=RESEARCH_MODEL,
+                agent=agent,
                 on_status=_make_status_writer(status),
             )
         except ResearchFailedError as exc:
@@ -154,7 +154,7 @@ def new_research_tab(client: Any, output_dir: str) -> None:
     )
 
 
-def followup_tab(client: Any, output_dir: str) -> None:
+def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
     """Render the 'Follow-up Analysis' tab."""
     st.subheader("Continue Research (Follow-up)")
 
@@ -219,7 +219,7 @@ def followup_tab(client: Any, output_dir: str) -> None:
             interaction = run_research(
                 client,
                 final_prompt,
-                model=RESEARCH_MODEL,
+                agent=agent,
                 on_status=_make_status_writer(status),
                 poll_interval=3.0,
             )

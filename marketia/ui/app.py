@@ -9,13 +9,19 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from marketia.core import MissingAPIKeyError, configure_logging, load_client
+from marketia.core import (
+    RESEARCH_MODEL_FAST,
+    RESEARCH_MODEL_MAX,
+    MissingAPIKeyError,
+    configure_logging,
+    load_client,
+)
 from marketia.ui.styles import CUSTOM_CSS
 from marketia.ui.tabs import followup_tab, new_research_tab
 
 
-def _render_sidebar() -> tuple[str, str]:
-    """Render the sidebar and return ``(api_key, output_dir)``."""
+def _render_sidebar() -> tuple[str, str, str]:
+    """Render the sidebar and return ``(api_key, output_dir, agent_model)``."""
     with st.sidebar:
         st.header("Settings")
         env_key = os.getenv("GOOGLE_API_KEY", "")
@@ -28,6 +34,19 @@ def _render_sidebar() -> tuple[str, str]:
         if not api_key:
             st.warning("Please enter your API Key to proceed.")
             st.stop()
+
+        st.divider()
+        speed = st.radio(
+            "Speed vs. Depth",
+            options=["Fast", "Max"],
+            help=(
+                "**Fast** (~$1–3): quick, broad insights.\n\n"
+                "**Max** (~$3–7): deeper, more comprehensive analysis."
+            ),
+            horizontal=True,
+            key="agent_speed",
+        )
+        agent_model = RESEARCH_MODEL_MAX if speed == "Max" else RESEARCH_MODEL_FAST
 
         st.divider()
         env_vault = os.getenv("OBSIDIAN_VAULT_PATH", "")
@@ -48,7 +67,7 @@ def _render_sidebar() -> tuple[str, str]:
                 st.caption(f"📁 Saving to: `{output_dir}`")
 
         st.info("Status: Ready")
-        return api_key, output_dir
+        return api_key, output_dir, agent_model
 
 
 def _get_client(api_key: str):
@@ -77,13 +96,13 @@ def main() -> None:
     )
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    api_key, output_dir = _render_sidebar()
+    api_key, output_dir, agent_model = _render_sidebar()
     client = _get_client(api_key)
 
     st.title("📊 Marketia Research Hub")
 
     tab1, tab2 = st.tabs(["🚀 New Research", "🔍 Follow-up Analysis"])
     with tab1:
-        new_research_tab(client, output_dir)
+        new_research_tab(client, output_dir, agent=agent_model)
     with tab2:
-        followup_tab(client, output_dir)
+        followup_tab(client, output_dir, agent=agent_model)
