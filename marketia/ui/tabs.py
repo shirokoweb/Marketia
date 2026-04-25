@@ -139,6 +139,8 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
             prompt_summary=research_prompt[:200],
             tokens_used=total_tokens,
             estimated_cost=total_cost,
+            interaction_id=getattr(interaction, "id", ""),
+            agent=agent,
             output_dir=output_dir,
         )
     except (OSError, NotADirectoryError) as exc:

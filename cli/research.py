@@ -156,6 +156,8 @@ def main() -> int:
             prompt_summary=prompt[:200],
             tokens_used=total_tokens,
             estimated_cost=total_cost,
+            interaction_id=getattr(interaction, "id", ""),
+            agent=agent_model,
             output_dir=args.output_dir,
         )
     except (OSError, NotADirectoryError) as exc:

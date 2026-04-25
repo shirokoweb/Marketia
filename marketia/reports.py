@@ -43,6 +43,8 @@ def generate_frontmatter(
     tokens_used: int = 0,
     estimated_cost: float = 0.0,
     follow_up_count: int = 0,
+    interaction_id: str = "",
+    agent: str = "",
 ) -> str:
     """Render a YAML frontmatter block (including the ``---`` fences)."""
     now = datetime.datetime.now()
@@ -56,6 +58,8 @@ def generate_frontmatter(
         "tokens_used": tokens_used,
         "estimated_cost": f"${estimated_cost:.4f}",
         "follow_up_count": follow_up_count,
+        "interaction_id": interaction_id,
+        "agent": agent,
         "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -111,6 +115,8 @@ def save_research_report(
     prompt_summary: str = "",
     tokens_used: int = 0,
     estimated_cost: float = 0.0,
+    interaction_id: str = "",
+    agent: str = "",
     output_dir: str = "",
 ) -> Path:
     """Write a new research report with frontmatter and a slug-based filename.
@@ -135,6 +141,8 @@ def save_research_report(
         prompt_summary=prompt_summary,
         tokens_used=tokens_used,
         estimated_cost=estimated_cost,
+        interaction_id=interaction_id,
+        agent=agent,
     )
     path.write_text(f"{frontmatter}# {title}\n\n## Research Report\n\n{content}", encoding="utf-8")
     logger.info("Saved report: %s", path)

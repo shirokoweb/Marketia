@@ -95,6 +95,66 @@ def test_update_frontmatter_merges_new_key():
 
 
 # ---------------------------------------------------------------------------
+# generate_frontmatter — interaction_id and agent fields (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_frontmatter_includes_interaction_id():
+    fm = generate_frontmatter("T", interaction_id="abc-123")
+    data, _ = parse_frontmatter(f"{fm}body")
+    assert data["interaction_id"] == "abc-123"
+
+
+def test_generate_frontmatter_includes_agent():
+    fm = generate_frontmatter("T", agent="deep-research-preview-04-2026")
+    data, _ = parse_frontmatter(f"{fm}body")
+    assert data["agent"] == "deep-research-preview-04-2026"
+
+
+def test_generate_frontmatter_defaults_empty_strings():
+    fm = generate_frontmatter("T")
+    data, _ = parse_frontmatter(f"{fm}body")
+    assert data.get("interaction_id", "") == ""
+    assert data.get("agent", "") == ""
+
+
+# ---------------------------------------------------------------------------
+# save_research_report — interaction_id and agent fields (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_save_research_report_persists_interaction_id(tmp_path):
+    path = save_research_report(
+        content="body",
+        title="T",
+        interaction_id="iid-xyz",
+        output_dir=str(tmp_path),
+    )
+    data, _ = parse_frontmatter(path.read_text())
+    assert data["interaction_id"] == "iid-xyz"
+
+
+def test_save_research_report_persists_agent(tmp_path):
+    path = save_research_report(
+        content="body",
+        title="T",
+        agent="deep-research-max-preview-04-2026",
+        output_dir=str(tmp_path),
+    )
+    data, _ = parse_frontmatter(path.read_text())
+    assert data["agent"] == "deep-research-max-preview-04-2026"
+
+
+def test_legacy_report_parses_without_error():
+    """Reports without interaction_id/agent must parse cleanly with .get() fallback."""
+    legacy = "---\ntitle: Old Report\ntype: research\ndate: 2025-12-01\n---\nbody"
+    data, body = parse_frontmatter(legacy)
+    assert data.get("interaction_id", "") == ""
+    assert data.get("agent", "") == ""
+    assert body.strip() == "body"
+
+
+# ---------------------------------------------------------------------------
 # save_research_report
 # ---------------------------------------------------------------------------
 
