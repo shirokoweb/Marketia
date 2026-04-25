@@ -10,12 +10,14 @@ import pytest
 
 from marketia import core
 from marketia.core import (
+    FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
     RESEARCH_MODEL_MAX,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
     calculate_cost,
+    run_followup,
     run_research,
 )
 
@@ -123,6 +125,54 @@ def test_run_research_uses_agent_kwarg():
     run_research(client, "prompt", agent=RESEARCH_MODEL_FAST, poll_interval=0)
     assert captured.get("agent") == RESEARCH_MODEL_FAST
     assert "model" not in captured, "model= must not be passed to client.interactions.create"
+
+
+# ---------------------------------------------------------------------------
+# run_followup (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_followup_model_constant():
+    assert FOLLOWUP_MODEL == "gemini-3.1-pro-preview"
+
+
+def test_run_followup_calls_create_with_correct_args():
+    """run_followup must use model= and previous_interaction_id=, not agent= or background=."""
+    captured = {}
+
+    class _FI:
+        id = "followup-id"
+        outputs = [types.SimpleNamespace(type="text", text="answer")]
+        usage = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create)
+    )
+    result = run_followup(client, "What next?", "parent-id-123")
+    assert captured.get("model") == FOLLOWUP_MODEL
+    assert captured.get("previous_interaction_id") == "parent-id-123"
+    assert captured.get("input") == "What next?"
+    assert "agent" not in captured, "agent= must not be passed in sync follow-up"
+    assert "background" not in captured, "background= must not be passed in sync follow-up"
+    assert result.id == "followup-id"
+
+
+def test_run_followup_accepts_custom_model():
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="x", outputs=[], usage=None)
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create)
+    )
+    run_followup(client, "Q", "pid", model="gemini-2.5-pro")
+    assert captured["model"] == "gemini-2.5-pro"
 
 
 # ---------------------------------------------------------------------------

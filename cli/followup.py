@@ -15,6 +15,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from marketia.core import (
+    RESEARCH_MODEL_FAST,
     MissingAPIKeyError,
     ResearchFailedError,
     ResearchTimeoutError,
@@ -22,9 +23,10 @@ from marketia.core import (
     configure_logging,
     extract_report_text,
     load_client,
+    run_followup,
     run_research,
 )
-from marketia.reports import append_followup_to_report
+from marketia.reports import append_followup_to_report, parse_frontmatter
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -47,6 +49,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--question-file",
         type=Path,
         help="Read the question from a file.",
+    )
+    parser.add_argument(
+        "--deep",
+        action="store_true",
+        help=(
+            "Force a full Deep Research follow-up (~$1–3) even if the report has an "
+            "interaction_id. Default: sync follow-up when possible."
+        ),
     )
     parser.add_argument(
         "-v",
@@ -97,26 +107,43 @@ def main() -> int:
         print(f"Error reading report: {exc}", file=sys.stderr)
         return 1
 
-    final_prompt = (
-        "CONTEXT:\n"
-        "The following is a market research report generated previously:\n"
-        f"===\n{context}\n===\n\n"
-        "TASK:\n"
-        "Based on the report above (and performing additional research if necessary), "
-        "please answer this follow-up request:\n"
-        f"{question}"
-    )
+    frontmatter, _ = parse_frontmatter(context)
+    parent_id = frontmatter.get("interaction_id", "") if frontmatter else ""
+    use_sync = bool(parent_id) and not args.deep
 
     print(f"Running follow-up for: {question[:120]}{'...' if len(question) > 120 else ''}")
-    try:
-        interaction = run_research(client, final_prompt, on_status=_on_status)
-    except ResearchFailedError as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        return 1
-    except ResearchTimeoutError as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        return 1
-    print()
+    if use_sync:
+        print(f"Mode: sync (previous_interaction_id={parent_id[:12]}...)")
+        try:
+            interaction = run_followup(client, question, parent_id)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        followup_mode = "sync"
+    else:
+        reason = "--deep flag" if args.deep else "no interaction_id in report"
+        print(f"Mode: deep ({reason})")
+        deep_prompt = (
+            "CONTEXT:\n"
+            "The following is a market research report generated previously:\n"
+            f"===\n{context}\n===\n\n"
+            "TASK:\n"
+            "Based on the report above (and performing additional research if necessary), "
+            "please answer this follow-up request:\n"
+            f"{question}"
+        )
+        try:
+            interaction = run_research(
+                client, deep_prompt, agent=RESEARCH_MODEL_FAST, on_status=_on_status
+            )
+        except ResearchFailedError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        except ResearchTimeoutError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        print()
+        followup_mode = "deep"
 
     followup_text = extract_report_text(interaction)
     if not followup_text:
@@ -140,6 +167,7 @@ def main() -> int:
             question=question,
             tokens_used=total_tokens,
             estimated_cost=total_cost,
+            mode=followup_mode,
         )
     except OSError as exc:
         print(f"Error appending follow-up: {exc}", file=sys.stderr)

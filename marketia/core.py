@@ -22,6 +22,9 @@ logger = logging.getLogger("marketia")
 # Model IDs — verified against https://ai.google.dev/gemini-api/docs/deep-research on 2026-04-24.
 RESEARCH_MODEL_FAST = "deep-research-preview-04-2026"
 RESEARCH_MODEL_MAX = "deep-research-max-preview-04-2026"
+# Standard Gemini model for sync follow-ups (source: cookbook notebook).
+# Override via MARKETIA_FOLLOWUP_MODEL env var if this preview ID is unavailable.
+FOLLOWUP_MODEL = os.getenv("MARKETIA_FOLLOWUP_MODEL", "gemini-3.1-pro-preview")
 FLASH_MODEL = "gemini-2.5-flash-lite"
 
 # base agent_config required by every Deep Research call (type key is mandatory per docs).
@@ -190,6 +193,29 @@ def run_research(
             )
 
         time.sleep(poll_interval)
+
+
+def run_followup(
+    client: genai.Client,
+    question: str,
+    previous_interaction_id: str,
+    *,
+    model: str = FOLLOWUP_MODEL,
+) -> Any:
+    """Submit a synchronous follow-up using ``previous_interaction_id``.
+
+    Uses the direct-model path (``model=``, no ``agent=``, no ``background=True``),
+    which is cheap and fast (<30 s) compared to a full deep-research task.
+
+    Returns the interaction object directly — no polling required.
+    """
+    interaction = client.interactions.create(
+        input=question,
+        model=model,
+        previous_interaction_id=previous_interaction_id,
+    )
+    logger.info("Sync follow-up completed: id=%s model=%s", interaction.id, model)
+    return interaction
 
 
 def extract_report_text(interaction: Any) -> str:

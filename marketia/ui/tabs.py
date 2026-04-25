@@ -9,11 +9,13 @@ from typing import Any
 import streamlit as st
 
 from marketia.core import (
+    FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
     extract_report_text,
+    run_followup,
     run_research,
 )
 from marketia.reports import (
@@ -173,9 +175,12 @@ def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST)
     )
     selected = options[selected_display]
 
+    # Read frontmatter to detect whether this is a V2 report with an interaction_id.
+    context_content = Path(selected["filename"]).read_text(encoding="utf-8")
+    frontmatter, body = parse_frontmatter(context_content)
+    parent_interaction_id = frontmatter.get("interaction_id", "") if frontmatter else ""
+
     with st.expander("📄 View Parent Report"):
-        context_content = Path(selected["filename"]).read_text(encoding="utf-8")
-        frontmatter, body = parse_frontmatter(context_content)
         if frontmatter:
             st.caption(
                 f"**Title:** {frontmatter.get('title', 'N/A')} | "
@@ -192,6 +197,23 @@ def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST)
         placeholder="e.g., 'Compare the pricing models' or 'Deep dive on competitor X'",
     )
 
+    force_deep = st.checkbox(
+        "Deep follow-up (full Deep Research task, ~$1–3)",
+        value=False,
+        help="Forces a full Deep Research task even when a sync shortcut is available.",
+    )
+
+    use_sync = bool(parent_interaction_id) and not force_deep
+    if use_sync:
+        st.info(
+            f"**Sync** · Uses `previous_interaction_id` via `{FOLLOWUP_MODEL}` · ~$0.01–0.05"
+        )
+    else:
+        reason = (
+            "no interaction ID in this report" if not parent_interaction_id else "deep mode forced"
+        )
+        st.info(f"**Deep** · Full Deep Research task (~$1–3) · {reason}")
+
     if not st.button("Run Follow-up", type="primary"):
         return
 
@@ -199,42 +221,52 @@ def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST)
         st.error("Please enter a question.")
         return
 
-    with st.status("Running follow-up research...", expanded=True) as status:
-        try:
-            context_content = Path(selected["filename"]).read_text(encoding="utf-8")
-        except OSError as exc:
-            status.update(label="Could not read parent report", state="error")
-            st.error(str(exc))
-            return
+    if use_sync:
+        with st.status("Running sync follow-up...", expanded=True) as status:
+            try:
+                interaction = run_followup(client, followup_query, parent_interaction_id)
+                status.update(label="Follow-up complete", state="complete", expanded=False)
+            except Exception as exc:
+                status.update(label="Follow-up failed", state="error")
+                st.error(str(exc))
+                return
+        followup_mode = "sync"
+    else:
+        with st.status("Running deep follow-up research...", expanded=True) as status:
+            try:
+                context_content = Path(selected["filename"]).read_text(encoding="utf-8")
+            except OSError as exc:
+                status.update(label="Could not read parent report", state="error")
+                st.error(str(exc))
+                return
 
-        final_prompt = (
-            "CONTEXT:\n"
-            "The following is a market research report generated previously:\n"
-            f"===\n{context_content}\n===\n\n"
-            "TASK:\n"
-            "Based on the report above (and performing additional research if necessary), "
-            "please answer this follow-up request:\n"
-            f"{followup_query}"
-        )
-
-        try:
-            interaction = run_research(
-                client,
-                final_prompt,
-                agent=agent,
-                on_status=_make_status_writer(status),
-                poll_interval=3.0,
+            deep_prompt = (
+                "CONTEXT:\n"
+                "The following is a market research report generated previously:\n"
+                f"===\n{context_content}\n===\n\n"
+                "TASK:\n"
+                "Based on the report above (and performing additional research if necessary), "
+                "please answer this follow-up request:\n"
+                f"{followup_query}"
             )
-        except ResearchFailedError as exc:
-            status.update(label="Follow-up failed", state="error")
-            st.error(str(exc))
-            return
-        except ResearchTimeoutError as exc:
-            status.update(label="Follow-up timed out", state="error")
-            st.error(str(exc))
-            return
-
-        status.update(label="Follow-up complete", state="complete", expanded=False)
+            try:
+                interaction = run_research(
+                    client,
+                    deep_prompt,
+                    agent=agent,
+                    on_status=_make_status_writer(status),
+                    poll_interval=3.0,
+                )
+            except ResearchFailedError as exc:
+                status.update(label="Follow-up failed", state="error")
+                st.error(str(exc))
+                return
+            except ResearchTimeoutError as exc:
+                status.update(label="Follow-up timed out", state="error")
+                st.error(str(exc))
+                return
+            status.update(label="Follow-up complete", state="complete", expanded=False)
+        followup_mode = "deep"
 
     followup_out = extract_report_text(interaction)
     if not followup_out:
@@ -257,6 +289,7 @@ def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST)
             question=followup_query,
             tokens_used=total_tokens,
             estimated_cost=total_cost,
+            mode=followup_mode,
         )
     except OSError as exc:
         st.error(f"Could not append follow-up: {exc}")

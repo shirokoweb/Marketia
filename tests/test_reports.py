@@ -201,3 +201,10 @@ def test_append_followup_adds_section(tmp_path):
     content = path.read_text()
     assert "Follow-up 1:" in content
     assert "answer here" in content
+
+
+def test_append_followup_records_mode(tmp_path):
+    path = save_research_report(content="body", title="Parent", output_dir=str(tmp_path))
+    append_followup_to_report(path, "answer", "Q", mode="sync")
+    content = path.read_text()
+    assert "sync" in content

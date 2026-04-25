@@ -156,6 +156,7 @@ def append_followup_to_report(
     *,
     tokens_used: int = 0,
     estimated_cost: float = 0.0,
+    mode: str = "",
 ) -> int:
     """Append a follow-up section to an existing report and bump ``follow_up_count``.
 
@@ -171,9 +172,11 @@ def append_followup_to_report(
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     header_suffix = f"{question[:50]}{'...' if len(question) > 50 else ''}"
+    mode_tag = f" | Mode: {mode}" if mode else ""
     section = (
         f"\n\n---\n\n## Follow-up {count}: {header_suffix}\n"
-        f"*Asked: {timestamp} | Tokens: {tokens_used:,} | Cost: ${estimated_cost:.4f}*\n\n"
+        f"*Asked: {timestamp} | Tokens: {tokens_used:,} | Cost: ${estimated_cost:.4f}"
+        f"{mode_tag}*\n\n"
         f"{followup_content}"
     )
 
