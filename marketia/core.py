@@ -7,14 +7,16 @@ reused in any context.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from google import genai
 
 logger = logging.getLogger("marketia")
@@ -215,6 +217,96 @@ def run_followup(
     )
     logger.info("Sync follow-up completed: id=%s model=%s", interaction.id, model)
     return interaction
+
+
+def run_research_streaming(
+    client: genai.Client,
+    prompt: str,
+    *,
+    agent: str = RESEARCH_MODEL_FAST,
+    agent_config: dict | None = None,
+    max_reconnects: int = 3,
+) -> Iterator[tuple[str, str | None, Any]]:
+    """Stream a Deep Research task, yielding ``(event_type, delta_type, payload)`` tuples.
+
+    Handles ~600 s SSE disconnects by reconnecting with ``last_event_id`` (up to
+    ``max_reconnects`` times). Yields:
+
+    - ``("interaction.start", None, interaction_id)``
+    - ``("content.delta", "text", text_str)``
+    - ``("content.delta", "thought_summary", text_str)``
+    - ``("content.delta", "image", raw_bytes)``
+    - ``("interaction.status_update", None, status_str)``
+    - ``("interaction.complete", None, interaction_obj)``
+    - ``("error", None, error_message_str)``
+    """
+    config: dict[str, Any] = {**_AGENT_CONFIG_BASE, "thinking_summaries": "auto"}
+    if agent_config:
+        config.update(agent_config)
+
+    stream = client.interactions.create(
+        agent=agent,
+        input=prompt,
+        stream=True,
+        background=True,
+        agent_config=config,
+    )
+
+    interaction_id: str | None = None
+    last_event_id: str | None = None
+    reconnects = 0
+
+    while True:
+        try:
+            for chunk in stream:
+                eid = getattr(chunk, "event_id", None)
+                if eid:
+                    last_event_id = eid
+
+                event_type: str = chunk.event_type
+
+                if event_type == "interaction.start":
+                    interaction_id = chunk.interaction.id
+                    yield ("interaction.start", None, interaction_id)
+
+                elif event_type == "content.delta":
+                    delta = chunk.delta
+                    delta_type = getattr(delta, "type", None)
+                    if delta_type == "text":
+                        yield ("content.delta", "text", delta.text)
+                    elif delta_type == "thought_summary":
+                        content = getattr(delta, "content", None)
+                        text = getattr(content, "text", "") if content else ""
+                        yield ("content.delta", "thought_summary", text or "")
+                    elif delta_type == "image":
+                        raw = getattr(delta, "data", None)
+                        if raw:
+                            yield ("content.delta", "image", base64.b64decode(raw))
+
+                elif event_type == "interaction.status_update":
+                    yield ("interaction.status_update", None, chunk.status)
+
+                elif event_type == "interaction.complete":
+                    yield ("interaction.complete", None, chunk.interaction)
+                    return
+
+                elif event_type == "error":
+                    yield ("error", None, str(getattr(chunk, "error", chunk)))
+                    return
+
+            return  # stream ended without interaction.complete
+
+        except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+            if interaction_id and last_event_id and reconnects < max_reconnects:
+                reconnects += 1
+                logger.warning(
+                    "Stream disconnected (%s); reconnecting (attempt %d)", exc, reconnects
+                )
+                stream = client.interactions.get(
+                    id=interaction_id, stream=True, last_event_id=last_event_id
+                )
+            else:
+                raise
 
 
 def extract_report_text(interaction: Any) -> str:

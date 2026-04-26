@@ -26,6 +26,7 @@ from marketia.core import (
     extract_report_text,
     load_client,
     run_research,
+    run_research_streaming,
 )
 from marketia.reports import generate_title_and_tags, save_research_report
 
@@ -75,6 +76,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Stream thought summaries to stderr as they arrive (uses streaming API).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -94,6 +100,34 @@ def _read_prompt(args: argparse.Namespace) -> str:
 
 def _on_status(phase: str, elapsed: float) -> None:
     print(f"\r[{int(elapsed):4d}s] status={phase}", end="", flush=True)
+
+
+def _run_streaming(client: object, prompt: str, agent: str) -> tuple[str, object | None]:
+    """Run research via streaming, printing thought summaries to stderr.
+
+    Returns ``(report_text, interaction)`` or ``("", None)`` on error.
+    """
+    text_parts: list[str] = []
+    interaction = None
+    try:
+        for event_type, delta_type, payload in run_research_streaming(client, prompt, agent=agent):
+            if event_type == "content.delta":
+                if delta_type == "text":
+                    text_parts.append(payload)
+                elif delta_type == "thought_summary" and payload:
+                    print(f"[thought] {payload[:120]}", file=sys.stderr)
+            elif event_type == "interaction.status_update":
+                print(f"\r[status] {payload}", end="", file=sys.stderr, flush=True)
+            elif event_type == "interaction.complete":
+                interaction = payload
+                print(file=sys.stderr)
+            elif event_type == "error":
+                print(f"\nStream error: {payload}", file=sys.stderr)
+                return "", None
+    except Exception as exc:
+        print(f"\nStreaming failed: {exc}", file=sys.stderr)
+        return "", None
+    return "".join(text_parts), interaction
 
 
 def main() -> int:
@@ -116,17 +150,22 @@ def main() -> int:
     agent_model = RESEARCH_MODEL_MAX if args.mode == "max" else RESEARCH_MODEL_FAST
     print(f"Starting research for: {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
     print(f"Mode: {args.mode} ({agent_model})")
-    try:
-        interaction = run_research(client, prompt, agent=agent_model, on_status=_on_status)
-    except ResearchFailedError as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        return 1
-    except ResearchTimeoutError as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        return 1
-    print()  # close the status line
 
-    report_text = extract_report_text(interaction)
+    if args.live:
+        report_text, interaction = _run_streaming(client, prompt, agent_model)
+        if interaction is None:
+            return 1
+    else:
+        try:
+            interaction = run_research(client, prompt, agent=agent_model, on_status=_on_status)
+        except ResearchFailedError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        except ResearchTimeoutError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        print()  # close the status line
+        report_text = extract_report_text(interaction)
     if not report_text:
         print("Research completed but returned no text output.", file=sys.stderr)
         return 1

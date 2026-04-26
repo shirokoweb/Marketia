@@ -6,6 +6,7 @@ import logging
 import types
 import warnings
 
+import httpx
 import pytest
 
 from marketia import core
@@ -19,6 +20,7 @@ from marketia.core import (
     calculate_cost,
     run_followup,
     run_research,
+    run_research_streaming,
 )
 
 # ---------------------------------------------------------------------------
@@ -222,3 +224,177 @@ def test_calculate_cost_above_threshold_higher():
 
 def test_calculate_cost_zero_tokens():
     assert calculate_cost(0, 0) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# run_research_streaming (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def _make_start(iid="stream-id", eid="e1"):
+    return types.SimpleNamespace(
+        event_type="interaction.start",
+        event_id=eid,
+        interaction=types.SimpleNamespace(id=iid),
+    )
+
+
+def _make_text_delta(text, eid="e2"):
+    return types.SimpleNamespace(
+        event_type="content.delta",
+        event_id=eid,
+        delta=types.SimpleNamespace(type="text", text=text),
+    )
+
+
+def _make_thought_delta(thought_text, eid="e3"):
+    return types.SimpleNamespace(
+        event_type="content.delta",
+        event_id=eid,
+        delta=types.SimpleNamespace(
+            type="thought_summary",
+            content=types.SimpleNamespace(text=thought_text),
+        ),
+    )
+
+
+def _make_complete(iid="stream-id", eid="e9"):
+    return types.SimpleNamespace(
+        event_type="interaction.complete",
+        event_id=eid,
+        interaction=types.SimpleNamespace(id=iid, outputs=[], usage=None),
+    )
+
+
+def _make_error(msg="boom", eid="ex"):
+    return types.SimpleNamespace(event_type="error", event_id=eid, error=msg)
+
+
+def _make_status_update(status, eid="es"):
+    return types.SimpleNamespace(
+        event_type="interaction.status_update", event_id=eid, status=status
+    )
+
+
+def _streaming_client(events, reconnect_events=None):
+    """Fake client whose create() returns events; optional get() returns reconnect_events."""
+
+    class _FakeStream:
+        def __init__(self, evts):
+            self._evts = evts
+
+        def __iter__(self):
+            yield from self._evts
+
+    def fake_create(**kwargs):
+        return _FakeStream(events)
+
+    def fake_get(id, *, stream, last_event_id=None, **kw):
+        return _FakeStream(reconnect_events or [])
+
+    return types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=fake_get)
+    )
+
+
+def test_streaming_yields_interaction_start():
+    client = _streaming_client([_make_start("abc"), _make_complete("abc")])
+    evts = list(run_research_streaming(client, "q"))
+    assert evts[0] == ("interaction.start", None, "abc")
+
+
+def test_streaming_yields_text_delta():
+    client = _streaming_client(
+        [_make_start(), _make_text_delta("hello "), _make_text_delta("world"), _make_complete()]
+    )
+    evts = list(run_research_streaming(client, "q"))
+    text_evts = [(et, dt, p) for et, dt, p in evts if dt == "text"]
+    assert text_evts == [
+        ("content.delta", "text", "hello "),
+        ("content.delta", "text", "world"),
+    ]
+
+
+def test_streaming_yields_thought_summary():
+    client = _streaming_client(
+        [_make_start(), _make_thought_delta("I am thinking..."), _make_complete()]
+    )
+    evts = list(run_research_streaming(client, "q"))
+    thought_evts = [(et, dt, p) for et, dt, p in evts if dt == "thought_summary"]
+    assert thought_evts == [("content.delta", "thought_summary", "I am thinking...")]
+
+
+def test_streaming_terminates_on_complete():
+    client = _streaming_client([_make_start(), _make_text_delta("x"), _make_complete()])
+    evts = list(run_research_streaming(client, "q"))
+    complete = [(et, dt, p) for et, dt, p in evts if et == "interaction.complete"]
+    assert len(complete) == 1
+
+
+def test_streaming_terminates_on_error():
+    client = _streaming_client([_make_start(), _make_error("bad thing")])
+    evts = list(run_research_streaming(client, "q"))
+    assert evts[-1][0] == "error"
+    assert "bad thing" in evts[-1][2]
+
+
+def test_streaming_agent_config_includes_thinking_summaries():
+    captured = {}
+
+    class _FakeStream:
+        def __iter__(self):
+            yield _make_start()
+            yield _make_complete()
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FakeStream()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create)
+    )
+    list(run_research_streaming(client, "q"))
+    cfg = captured.get("agent_config", {})
+    assert cfg.get("type") == "deep-research"
+    assert cfg.get("thinking_summaries") == "auto"
+
+
+def test_streaming_reconnects_on_disconnect():
+    """On httpx.ReadTimeout after first event, reconnect via get() with last_event_id."""
+    reconnect_events = [_make_text_delta("resumed"), _make_complete()]
+    reconnect_captured = {}
+
+    class _FakeStreamDisconnects:
+        def __iter__(self):
+            yield _make_start("sid", eid="e1")
+            raise httpx.ReadTimeout("timeout")
+
+    class _FakeStreamReconnect:
+        def __iter__(self):
+            yield from reconnect_events
+
+    def fake_create(**kwargs):
+        return _FakeStreamDisconnects()
+
+    def fake_get(id, *, stream, last_event_id=None, **kw):
+        reconnect_captured["id"] = id
+        reconnect_captured["last_event_id"] = last_event_id
+        return _FakeStreamReconnect()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=fake_get)
+    )
+    evts = list(run_research_streaming(client, "q"))
+    assert reconnect_captured["id"] == "sid"
+    assert reconnect_captured["last_event_id"] == "e1"
+    text_evts = [p for et, dt, p in evts if dt == "text"]
+    assert "resumed" in text_evts
+
+
+def test_streaming_status_update_yielded():
+    client = _streaming_client(
+        [_make_start(), _make_status_update("planning"), _make_complete()]
+    )
+    evts = list(run_research_streaming(client, "q"))
+    status_evts = [(et, dt, p) for et, dt, p in evts if et == "interaction.status_update"]
+    assert status_evts == [("interaction.status_update", None, "planning")]

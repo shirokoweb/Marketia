@@ -17,6 +17,7 @@ from marketia.core import (
     extract_report_text,
     run_followup,
     run_research,
+    run_research_streaming,
 )
 from marketia.reports import (
     append_followup_to_report,
@@ -89,28 +90,57 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         st.error("Please enter a prompt.")
         return
 
-    with st.status("Submitting research task...", expanded=True) as status:
+    thoughts_expander = st.expander("Thoughts (live)", expanded=False)
+    thoughts_placeholder = thoughts_expander.empty()
+    text_placeholder = st.empty()
+
+    thoughts: list[str] = []
+    full_report = ""
+    interaction = None
+
+    try:
+        for event_type, delta_type, payload in run_research_streaming(
+            client, research_prompt, agent=agent
+        ):
+            if event_type == "content.delta":
+                if delta_type == "text":
+                    full_report += payload
+                    text_placeholder.markdown(full_report)
+                elif delta_type == "thought_summary" and payload:
+                    thoughts.append(payload)
+                    thoughts_placeholder.markdown(
+                        "\n\n".join(f"_{t}_" for t in thoughts[-3:])
+                    )
+            elif event_type == "interaction.status_update":
+                logger.debug("status_update: %s", payload)
+            elif event_type == "interaction.complete":
+                interaction = payload
+            elif event_type == "error":
+                st.error(f"Stream error: {payload}")
+                return
+    except Exception as exc:
+        logger.warning("Streaming failed (%s); falling back to poll mode", exc)
         try:
             interaction = run_research(
-                client,
-                research_prompt,
-                agent=agent,
-                on_status=_make_status_writer(status),
+                client, research_prompt, agent=agent, on_status=_make_status_writer(
+                    st.status("Research in progress (poll mode)...", expanded=True)
+                )
             )
-        except ResearchFailedError as exc:
-            status.update(label="Research failed", state="error")
-            st.error(str(exc))
+        except ResearchFailedError as exc2:
+            st.error(str(exc2))
             return
-        except ResearchTimeoutError as exc:
-            status.update(label="Research timed out", state="error")
-            st.error(str(exc))
+        except ResearchTimeoutError as exc2:
+            st.error(str(exc2))
             return
+        full_report = extract_report_text(interaction)
 
-        status.update(label="Research completed", state="complete", expanded=False)
-
-    full_report = extract_report_text(interaction)
+    text_placeholder.empty()
     if not full_report:
         st.warning("Task completed but returned no text output.")
+        return
+
+    if interaction is None:
+        st.warning("No interaction object returned.")
         return
 
     usage = Usage.from_interaction(interaction)

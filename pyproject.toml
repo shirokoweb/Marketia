@@ -74,6 +74,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Streamlit tabs and CLI mains use early-return control flow; the "too many
 # returns/statements" rules add no value here.
+# core.py: run_research_streaming dispatches on many event/delta types; extracting helpers
+# would obscure the event-handling logic without improving correctness.
+"marketia/core.py" = ["PLR0912"]
 "marketia/ui/tabs.py" = ["PLR0911", "PLR0912", "PLR0915"]
 "cli/*.py" = ["PLR0911", "PLR0912", "PLR0915"]
 
