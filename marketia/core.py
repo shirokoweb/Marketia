@@ -22,9 +22,8 @@ logger = logging.getLogger("marketia")
 # Model IDs — verified against https://ai.google.dev/gemini-api/docs/deep-research on 2026-04-24.
 RESEARCH_MODEL_FAST = "deep-research-preview-04-2026"
 RESEARCH_MODEL_MAX = "deep-research-max-preview-04-2026"
-# Standard Gemini model for sync follow-ups (source: cookbook notebook).
-# Override via MARKETIA_FOLLOWUP_MODEL env var if this preview ID is unavailable.
-FOLLOWUP_MODEL = os.getenv("MARKETIA_FOLLOWUP_MODEL", "gemini-3.1-pro-preview")
+# gemini-3.1-pro-preview rejects previous_interaction_id; 2.5-flash accepts it and is cheap.
+FOLLOWUP_MODEL = os.getenv("MARKETIA_FOLLOWUP_MODEL", "gemini-2.5-flash")
 FLASH_MODEL = "gemini-2.5-flash-lite"
 
 # base agent_config required by every Deep Research call (type key is mandatory per docs).

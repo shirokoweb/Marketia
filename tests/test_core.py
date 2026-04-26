@@ -133,7 +133,7 @@ def test_run_research_uses_agent_kwarg():
 
 
 def test_followup_model_constant():
-    assert FOLLOWUP_MODEL == "gemini-3.1-pro-preview"
+    assert FOLLOWUP_MODEL == "gemini-2.5-flash"
 
 
 def test_run_followup_calls_create_with_correct_args():
