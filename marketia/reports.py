@@ -45,6 +45,7 @@ def generate_frontmatter(
     follow_up_count: int = 0,
     interaction_id: str = "",
     agent: str = "",
+    plan_rounds: int = 0,
 ) -> str:
     """Render a YAML frontmatter block (including the ``---`` fences)."""
     now = datetime.datetime.now()
@@ -60,6 +61,7 @@ def generate_frontmatter(
         "follow_up_count": follow_up_count,
         "interaction_id": interaction_id,
         "agent": agent,
+        "plan_rounds": plan_rounds,
         "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -117,6 +119,7 @@ def save_research_report(
     estimated_cost: float = 0.0,
     interaction_id: str = "",
     agent: str = "",
+    plan_rounds: int = 0,
     output_dir: str = "",
 ) -> Path:
     """Write a new research report with frontmatter and a slug-based filename.
@@ -143,6 +146,7 @@ def save_research_report(
         estimated_cost=estimated_cost,
         interaction_id=interaction_id,
         agent=agent,
+        plan_rounds=plan_rounds,
     )
     path.write_text(f"{frontmatter}# {title}\n\n## Research Report\n\n{content}", encoding="utf-8")
     logger.info("Saved report: %s", path)

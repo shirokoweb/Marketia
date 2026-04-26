@@ -66,6 +66,51 @@ class ResearchFailedError(RuntimeError):
     """Raised when the remote research interaction reports a failed status."""
 
 
+_PLAN_TRANSITIONS: dict[str, frozenset[str]] = {
+    "awaiting_plan": frozenset({"plan_ready"}),
+    "plan_ready": frozenset({"plan_ready", "executing"}),
+    "executing": frozenset({"done"}),
+    "done": frozenset(),
+}
+
+
+class PlanSession:
+    """Manages collaborative-planning session state across plan/refine/execute rounds."""
+
+    def __init__(self, prompt: str) -> None:
+        self.prompt = prompt
+        self.phase = "awaiting_plan"
+        self.interaction_id = ""
+        self.plan_text = ""
+        self.rounds = 0
+
+    def advance(
+        self,
+        new_phase: str,
+        *,
+        interaction_id: str = "",
+        plan_text: str = "",
+    ) -> None:
+        """Transition to ``new_phase``, updating tracked state.
+
+        Raises ``ValueError`` for invalid transitions.
+        Refinements (plan_ready → plan_ready) increment ``rounds``.
+        """
+        allowed = _PLAN_TRANSITIONS.get(self.phase, frozenset())
+        if new_phase not in allowed:
+            raise ValueError(
+                f"Cannot transition from {self.phase!r} to {new_phase!r}. "
+                f"Allowed: {sorted(allowed)}"
+            )
+        if new_phase == "plan_ready" and self.phase == "plan_ready":
+            self.rounds += 1
+        self.phase = new_phase
+        if interaction_id:
+            self.interaction_id = interaction_id
+        if plan_text:
+            self.plan_text = plan_text
+
+
 def configure_logging(level: int = logging.INFO) -> None:
     """Configure the ``marketia`` logger with a simple console handler.
 
@@ -149,6 +194,8 @@ def run_research(
     on_status: StatusCallback | None = None,
     poll_interval: float = 5.0,
     timeout: float = 30 * 60,
+    previous_interaction_id: str = "",
+    extra_agent_config: dict | None = None,
 ) -> Any:
     """Submit a research interaction in background mode and poll to completion.
 
@@ -160,6 +207,9 @@ def run_research(
             ``(status_string, elapsed_seconds)``. Use for honest progress UX.
         poll_interval: Seconds between status polls.
         timeout: Seconds to wait before raising ``ResearchTimeoutError``.
+        previous_interaction_id: For plan refinement/approval rounds.
+        extra_agent_config: Keys merged into ``_AGENT_CONFIG_BASE``
+            (e.g. ``{"collaborative_planning": True}``).
 
     Returns:
         The completed interaction object from the Google GenAI SDK.
@@ -168,7 +218,20 @@ def run_research(
         ResearchFailedError: If the API reports a failed status.
         ResearchTimeoutError: If the interaction exceeds ``timeout`` seconds.
     """
-    interaction = client.interactions.create(agent=agent, input=prompt, background=True)
+    agent_config: dict[str, Any] = {**_AGENT_CONFIG_BASE}
+    if extra_agent_config:
+        agent_config.update(extra_agent_config)
+
+    create_kwargs: dict[str, Any] = {
+        "agent": agent,
+        "input": prompt,
+        "background": True,
+        "agent_config": agent_config,
+    }
+    if previous_interaction_id:
+        create_kwargs["previous_interaction_id"] = previous_interaction_id
+
+    interaction = client.interactions.create(**create_kwargs)
     logger.info("Research interaction started: id=%s agent=%s", interaction.id, agent)
     start = time.time()
 
@@ -225,6 +288,7 @@ def run_research_streaming(
     *,
     agent: str = RESEARCH_MODEL_FAST,
     agent_config: dict | None = None,
+    previous_interaction_id: str = "",
     max_reconnects: int = 3,
 ) -> Iterator[tuple[str, str | None, Any]]:
     """Stream a Deep Research task, yielding ``(event_type, delta_type, payload)`` tuples.
@@ -244,13 +308,17 @@ def run_research_streaming(
     if agent_config:
         config.update(agent_config)
 
-    stream = client.interactions.create(
-        agent=agent,
-        input=prompt,
-        stream=True,
-        background=True,
-        agent_config=config,
-    )
+    create_kwargs: dict[str, Any] = {
+        "agent": agent,
+        "input": prompt,
+        "stream": True,
+        "background": True,
+        "agent_config": config,
+    }
+    if previous_interaction_id:
+        create_kwargs["previous_interaction_id"] = previous_interaction_id
+
+    stream = client.interactions.create(**create_kwargs)
 
     interaction_id: str | None = None
     last_event_id: str | None = None

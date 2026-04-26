@@ -208,3 +208,17 @@ def test_append_followup_records_mode(tmp_path):
     append_followup_to_report(path, "answer", "Q", mode="sync")
     content = path.read_text()
     assert "sync" in content
+
+
+def test_save_report_includes_plan_rounds(tmp_path):
+    path = save_research_report(
+        content="body", title="T", output_dir=str(tmp_path), plan_rounds=3
+    )
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("plan_rounds") == 3
+
+
+def test_save_report_plan_rounds_defaults_zero(tmp_path):
+    path = save_research_report(content="body", title="T", output_dir=str(tmp_path))
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("plan_rounds", 0) == 0

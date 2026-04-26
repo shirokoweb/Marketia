@@ -11,6 +11,7 @@ import streamlit as st
 from marketia.core import (
     FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
+    PlanSession,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
@@ -58,54 +59,39 @@ def _make_status_writer(status: Any) -> Any:
     return on_status
 
 
-def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
-    """Render the 'New Research' tab."""
-    st.subheader("Launch New Deep Research Task")
+def _stream_research(
+    client: Any,
+    prompt: str,
+    agent: str,
+    *,
+    extra_agent_config: dict | None = None,
+    previous_interaction_id: str = "",
+) -> tuple[str, Any]:
+    """Run streaming research, returning ``(full_text, interaction)``.
 
-    report_title = st.text_input(
-        "Report Title (optional)",
-        placeholder="Leave empty for AI-generated title, or enter your own...",
-        help="A descriptive title for your research. If empty, one is generated from the prompt.",
-    )
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        research_prompt = st.text_area(
-            "Research Objectives & Prompt",
-            height=250,
-            placeholder=(
-                "Describe your market research goal, key questions, and desired output format..."
-            ),
-        )
-    with col2:
-        uploaded = st.file_uploader("Or upload prompt file (.txt)", type=["txt"])
-        if uploaded is not None:
-            research_prompt = uploaded.read().decode("utf-8")
-            st.success(f"Loaded: {uploaded.name}")
-
-    if not st.button("Start Deep Research", type="primary"):
-        return
-
-    if not research_prompt:
-        st.error("Please enter a prompt.")
-        return
-
+    Falls back to poll mode on streaming errors. Returns ``("", None)`` on failure
+    (caller must check and surface the error).
+    """
     thoughts_expander = st.expander("Thoughts (live)", expanded=False)
     thoughts_placeholder = thoughts_expander.empty()
     text_placeholder = st.empty()
-
     thoughts: list[str] = []
-    full_report = ""
+    full_text = ""
     interaction = None
 
     try:
+        stream_cfg = extra_agent_config or {}
         for event_type, delta_type, payload in run_research_streaming(
-            client, research_prompt, agent=agent
+            client,
+            prompt,
+            agent=agent,
+            agent_config={**stream_cfg, "thinking_summaries": "auto"} if stream_cfg else None,
+            previous_interaction_id=previous_interaction_id,
         ):
             if event_type == "content.delta":
                 if delta_type == "text":
-                    full_report += payload
-                    text_placeholder.markdown(full_report)
+                    full_text += payload
+                    text_placeholder.markdown(full_text)
                 elif delta_type == "thought_summary" and payload:
                     thoughts.append(payload)
                     thoughts_placeholder.markdown(
@@ -117,32 +103,39 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
                 interaction = payload
             elif event_type == "error":
                 st.error(f"Stream error: {payload}")
-                return
+                return "", None
     except Exception as exc:
         logger.warning("Streaming failed (%s); falling back to poll mode", exc)
+        status_box = st.status("Research in progress (poll mode)...", expanded=True)
         try:
             interaction = run_research(
-                client, research_prompt, agent=agent, on_status=_make_status_writer(
-                    st.status("Research in progress (poll mode)...", expanded=True)
-                )
+                client,
+                prompt,
+                agent=agent,
+                extra_agent_config=extra_agent_config,
+                previous_interaction_id=previous_interaction_id,
+                on_status=_make_status_writer(status_box),
             )
-        except ResearchFailedError as exc2:
+        except (ResearchFailedError, ResearchTimeoutError) as exc2:
             st.error(str(exc2))
-            return
-        except ResearchTimeoutError as exc2:
-            st.error(str(exc2))
-            return
-        full_report = extract_report_text(interaction)
+            return "", None
+        full_text = extract_report_text(interaction)
 
     text_placeholder.empty()
-    if not full_report:
-        st.warning("Task completed but returned no text output.")
-        return
+    return full_text, interaction
 
-    if interaction is None:
-        st.warning("No interaction object returned.")
-        return
 
+def _save_and_display(
+    client: Any,
+    full_report: str,
+    interaction: Any,
+    research_prompt: str,
+    report_title: str,
+    agent: str,
+    output_dir: str,
+    plan_rounds: int = 0,
+) -> None:
+    """Render metrics, the report body, and save the file."""
     usage = Usage.from_interaction(interaction)
     logger.debug("usage=%s", usage)
     st.divider()
@@ -173,6 +166,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
             estimated_cost=total_cost,
             interaction_id=getattr(interaction, "id", ""),
             agent=agent,
+            plan_rounds=plan_rounds,
             output_dir=output_dir,
         )
     except (OSError, NotADirectoryError) as exc:
@@ -185,6 +179,137 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         data=saved_path.read_text(encoding="utf-8"),
         file_name=saved_path.name,
         mime="text/markdown",
+    )
+
+
+def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
+    """Render the 'New Research' tab."""
+    st.subheader("Launch New Deep Research Task")
+
+    # ── Planning session in progress ────────────────────────────────────────
+    plan_session: PlanSession | None = st.session_state.get("plan_session")
+    if plan_session is not None and plan_session.phase == "plan_ready":
+        st.info(
+            f"**Plan ready** · {plan_session.rounds} refinement(s) so far · "
+            f"Prompt: _{plan_session.prompt[:80]}_"
+        )
+        st.markdown("### Proposed Research Plan")
+        st.markdown(plan_session.plan_text)
+        st.divider()
+
+        refinement = st.text_area(
+            "Refine the plan (optional)",
+            placeholder="e.g. 'Focus more on cost comparison, drop the history section.'",
+        )
+        col_refine, col_approve = st.columns(2)
+
+        if col_refine.button("Refine Plan", disabled=not refinement):
+            with st.spinner("Refining plan..."):
+                plan_text, interaction = _stream_research(
+                    client,
+                    refinement,
+                    agent,
+                    extra_agent_config={"collaborative_planning": True},
+                    previous_interaction_id=plan_session.interaction_id,
+                )
+            if interaction is None:
+                return
+            plan_session.advance(
+                "plan_ready",
+                interaction_id=getattr(interaction, "id", plan_session.interaction_id),
+                plan_text=plan_text or plan_session.plan_text,
+            )
+            st.rerun()
+
+        if col_approve.button("Approve & Run", type="primary"):
+            with st.spinner("Approving plan and starting full research…"):
+                full_report, interaction = _stream_research(
+                    client,
+                    "Approved. Please proceed with the full research.",
+                    agent,
+                    extra_agent_config={"collaborative_planning": False},
+                    previous_interaction_id=plan_session.interaction_id,
+                )
+            if interaction is None:
+                return
+            plan_rounds = plan_session.rounds
+            prompt = plan_session.prompt
+            del st.session_state["plan_session"]
+            if not full_report:
+                st.warning("Task completed but returned no text output.")
+                return
+            _save_and_display(
+                client, full_report, interaction, prompt, "", agent, output_dir,
+                plan_rounds=plan_rounds,
+            )
+        return
+
+    # ── Normal research form ─────────────────────────────────────────────────
+    report_title = st.text_input(
+        "Report Title (optional)",
+        placeholder="Leave empty for AI-generated title, or enter your own...",
+        help="A descriptive title for your research. If empty, one is generated from the prompt.",
+    )
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        research_prompt = st.text_area(
+            "Research Objectives & Prompt",
+            height=250,
+            placeholder=(
+                "Describe your market research goal, key questions, and desired output format..."
+            ),
+        )
+    with col2:
+        uploaded = st.file_uploader("Or upload prompt file (.txt)", type=["txt"])
+        if uploaded is not None:
+            research_prompt = uploaded.read().decode("utf-8")
+            st.success(f"Loaded: {uploaded.name}")
+
+    review_plan = st.checkbox(
+        "Review plan first (collaborative planning)",
+        value=False,
+        help=(
+            "Ask the agent to produce a research plan before executing. "
+            "You can refine the plan before approving full execution (~$0.10–0.50 per round)."
+        ),
+    )
+
+    if not st.button("Start Deep Research", type="primary"):
+        return
+
+    if not research_prompt:
+        st.error("Please enter a prompt.")
+        return
+
+    if review_plan:
+        with st.spinner("Generating research plan…"):
+            plan_text, interaction = _stream_research(
+                client,
+                research_prompt,
+                agent,
+                extra_agent_config={"collaborative_planning": True},
+            )
+        if interaction is None:
+            return
+        session = PlanSession(research_prompt)
+        session.advance(
+            "plan_ready",
+            interaction_id=getattr(interaction, "id", ""),
+            plan_text=plan_text,
+        )
+        st.session_state["plan_session"] = session
+        st.rerun()
+        return
+
+    full_report, interaction = _stream_research(client, research_prompt, agent)
+    if interaction is None:
+        return
+    if not full_report:
+        st.warning("Task completed but returned no text output.")
+        return
+    _save_and_display(
+        client, full_report, interaction, research_prompt, report_title, agent, output_dir
     )
 
 

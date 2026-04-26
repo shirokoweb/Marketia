@@ -14,6 +14,7 @@ from marketia.core import (
     FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
     RESEARCH_MODEL_MAX,
+    PlanSession,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
@@ -127,6 +128,135 @@ def test_run_research_uses_agent_kwarg():
     run_research(client, "prompt", agent=RESEARCH_MODEL_FAST, poll_interval=0)
     assert captured.get("agent") == RESEARCH_MODEL_FAST
     assert "model" not in captured, "model= must not be passed to client.interactions.create"
+
+
+# ---------------------------------------------------------------------------
+# run_research — previous_interaction_id + extra_agent_config (Task 6)
+# ---------------------------------------------------------------------------
+
+
+def test_run_research_passes_previous_interaction_id():
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    run_research(client, "p", previous_interaction_id="prev-123", poll_interval=0)
+    assert captured.get("previous_interaction_id") == "prev-123"
+
+
+def test_run_research_extra_agent_config_merged():
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    run_research(client, "p", extra_agent_config={"collaborative_planning": True}, poll_interval=0)
+    cfg = captured.get("agent_config", {})
+    assert cfg.get("type") == "deep-research"
+    assert cfg.get("collaborative_planning") is True
+
+
+def test_run_research_omits_previous_interaction_id_when_empty():
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    run_research(client, "p", poll_interval=0)
+    assert "previous_interaction_id" not in captured
+
+
+# ---------------------------------------------------------------------------
+# PlanSession state machine (Task 6)
+# ---------------------------------------------------------------------------
+
+
+def test_plan_session_initial_phase():
+    s = PlanSession("my prompt")
+    assert s.phase == "awaiting_plan"
+    assert s.rounds == 0
+    assert s.prompt == "my prompt"
+
+
+def test_plan_session_advance_to_plan_ready():
+    s = PlanSession("p")
+    s.advance("plan_ready", interaction_id="id1", plan_text="Here is the plan.")
+    assert s.phase == "plan_ready"
+    assert s.interaction_id == "id1"
+    assert s.plan_text == "Here is the plan."
+
+
+def test_plan_session_refine_increments_rounds():
+    s = PlanSession("p")
+    s.advance("plan_ready", interaction_id="id1", plan_text="Plan v1")
+    s.advance("plan_ready", interaction_id="id2", plan_text="Plan v2")
+    assert s.rounds == 1
+    s.advance("plan_ready", interaction_id="id3", plan_text="Plan v3")
+    assert s.rounds == 2
+
+
+def test_plan_session_advance_to_executing():
+    s = PlanSession("p")
+    s.advance("plan_ready", interaction_id="id1", plan_text="Plan.")
+    s.advance("executing", interaction_id="id2")
+    assert s.phase == "executing"
+
+
+def test_plan_session_advance_to_done():
+    s = PlanSession("p")
+    s.advance("plan_ready", interaction_id="id1", plan_text="Plan.")
+    s.advance("executing", interaction_id="id2")
+    s.advance("done")
+    assert s.phase == "done"
+
+
+def test_plan_session_invalid_transition_raises():
+    s = PlanSession("p")
+    with pytest.raises(ValueError, match="Cannot transition"):
+        s.advance("executing")  # must go through plan_ready first
+
+
+def test_plan_session_done_cannot_advance():
+    s = PlanSession("p")
+    s.advance("plan_ready", interaction_id="id1", plan_text="p")
+    s.advance("executing")
+    s.advance("done")
+    with pytest.raises(ValueError, match="Cannot transition"):
+        s.advance("plan_ready")
 
 
 # ---------------------------------------------------------------------------
