@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "google-genai>=1.47.0,<2.0",
+    "google-genai>=1.73.0,<2.0",
     "streamlit>=1.50.0,<2.0",
     "python-dotenv>=1.2.0,<2.0",
     "pyyaml>=6.0,<7.0",
