@@ -106,3 +106,6 @@ def main() -> None:
         new_research_tab(client, output_dir, agent=agent_model)
     with tab2:
         followup_tab(client, output_dir, agent=agent_model)
+
+
+main()
