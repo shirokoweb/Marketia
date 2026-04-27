@@ -48,3 +48,47 @@ def build_file_search_tool(store_names: list[str]) -> dict | None:
     if not store_names:
         return None
     return {"type": "file_search", "file_search_store_names": list(store_names)}
+
+
+# ---------------------------------------------------------------------------
+# MCP servers — auth headers are NOT persisted (security boundary)
+# ---------------------------------------------------------------------------
+
+_SAFE_MCP_KEYS = {"name", "url", "allowed_tools"}
+
+
+def _strip_headers(server: dict) -> dict:
+    """Return a copy of ``server`` with ``headers`` removed (never persisted)."""
+    return {k: v for k, v in server.items() if k != "headers"}
+
+
+def get_mcp_servers(settings: dict | None = None) -> list[dict]:
+    """Return configured MCP server records (no auth headers), or an empty list."""
+    s = settings if settings is not None else load_settings()
+    return s.get("mcp_servers", [])
+
+
+def set_mcp_servers(servers: list[dict], settings: dict | None = None) -> None:
+    """Persist MCP server configs, stripping auth headers before writing."""
+    s = settings if settings is not None else load_settings()
+    s["mcp_servers"] = [_strip_headers(srv) for srv in servers]
+    save_settings(s)
+
+
+def build_mcp_tools(servers: list[dict]) -> list[dict] | None:
+    """Return API-ready mcp_server tool dicts, or None for an empty list.
+
+    Auth headers from the in-memory ``servers`` are included in the tool dict
+    but are NOT saved to disk (see ``set_mcp_servers``).
+    """
+    if not servers:
+        return None
+    tools = []
+    for srv in servers:
+        entry: dict = {"type": "mcp_server", "name": srv["name"], "url": srv["url"]}
+        if srv.get("headers"):
+            entry["headers"] = dict(srv["headers"])
+        if srv.get("allowed_tools"):
+            entry["allowed_tools"] = list(srv["allowed_tools"])
+        tools.append(entry)
+    return tools

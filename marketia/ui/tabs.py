@@ -208,6 +208,7 @@ def new_research_tab(
     output_dir: str,
     agent: str = RESEARCH_MODEL_FAST,
     file_search_stores: list[str] | None = None,
+    extra_tools: list[dict] | None = None,
 ) -> None:
     """Render the 'New Research' tab."""
     st.subheader("Launch New Deep Research Task")
@@ -248,7 +249,12 @@ def new_research_tab(
             st.rerun()
 
         if col_approve.button("Approve & Run", type="primary"):
-            _tools = [build_file_search_tool(file_search_stores)] if file_search_stores else None
+            _tools_list: list[dict] = []
+            _fs = build_file_search_tool(file_search_stores or [])
+            if _fs:
+                _tools_list.append(_fs)
+            _tools_list.extend(extra_tools or [])
+            _tools = _tools_list or None
             with st.spinner("Approving plan and starting full research…"):
                 full_report, images, interaction = _stream_research(
                     client,
@@ -338,7 +344,12 @@ def new_research_tab(
             st.error(f"{f.name}: {exc}")
             return
 
-    _tools = [build_file_search_tool(file_search_stores)] if file_search_stores else None
+    _tools_combined: list[dict] = []
+    _fs_tool = build_file_search_tool(file_search_stores or [])
+    if _fs_tool:
+        _tools_combined.append(_fs_tool)
+    _tools_combined.extend(extra_tools or [])
+    _tools = _tools_combined or None
 
     if review_plan:
         with st.spinner("Generating research plan…"):
@@ -390,6 +401,7 @@ def followup_tab(
     output_dir: str,
     agent: str = RESEARCH_MODEL_FAST,
     file_search_stores: list[str] | None = None,
+    extra_tools: list[dict] | None = None,
 ) -> None:
     """Render the 'Follow-up Analysis' tab."""
     st.subheader("Continue Research (Follow-up)")

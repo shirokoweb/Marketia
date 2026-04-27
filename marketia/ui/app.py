@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -16,13 +17,19 @@ from marketia.core import (
     configure_logging,
     load_client,
 )
-from marketia.settings import get_file_search_stores, set_file_search_stores
+from marketia.settings import (
+    build_mcp_tools,
+    get_file_search_stores,
+    get_mcp_servers,
+    set_file_search_stores,
+    set_mcp_servers,
+)
 from marketia.ui.styles import CUSTOM_CSS
 from marketia.ui.tabs import followup_tab, new_research_tab
 
 
-def _render_sidebar() -> tuple[str, str, str, list[str]]:
-    """Render the sidebar and return ``(api_key, output_dir, agent_model, file_search_stores)``."""
+def _render_sidebar() -> tuple[str, str, str, list[str], list[dict] | None]:
+    """Render sidebar and return ``(api_key, output_dir, agent_model, stores, mcp_tools)``."""
     with st.sidebar:
         st.header("Settings")
         env_key = os.getenv("GOOGLE_API_KEY", "")
@@ -86,8 +93,44 @@ def _render_sidebar() -> tuple[str, str, str, list[str]]:
                 st.success(f"Saved {len(parsed)} store(s).")
             file_search_stores = [s.strip() for s in stores_text.splitlines() if s.strip()]
 
+        with st.expander("MCP Servers"):
+            st.caption(
+                "Add MCP servers to extend research with private tools. "
+                "Auth headers are never saved to disk."
+            )
+            saved_servers = get_mcp_servers()
+            mcp_json = st.text_area(
+                "Servers (JSON list)",
+                value=json.dumps(saved_servers, indent=2) if saved_servers else "[]",
+                height=120,
+                placeholder='[{"name": "echo", "url": "https://..."}]',
+                key="mcp_servers_input",
+            )
+            auth_header = st.text_input(
+                "Auth header value (all servers, not saved)",
+                placeholder="Bearer <token>",
+                type="password",
+                key="mcp_auth_header",
+            )
+            if st.button("Save MCP servers", key="save_mcp"):
+                try:
+                    parsed_servers = json.loads(mcp_json or "[]")
+                    set_mcp_servers(parsed_servers)
+                    st.success(f"Saved {len(parsed_servers)} server(s).")
+                except json.JSONDecodeError as exc:
+                    st.error(f"Invalid JSON: {exc}")
+            try:
+                active_servers = json.loads(mcp_json or "[]")
+            except json.JSONDecodeError:
+                active_servers = []
+            if auth_header:
+                active_servers = [
+                    {**srv, "headers": {"Authorization": auth_header}} for srv in active_servers
+                ]
+            mcp_tools = build_mcp_tools(active_servers)
+
         st.info("Status: Ready")
-        return api_key, output_dir, agent_model, file_search_stores
+        return api_key, output_dir, agent_model, file_search_stores, mcp_tools
 
 
 def _get_client(api_key: str):
@@ -116,7 +159,7 @@ def main() -> None:
     )
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    api_key, output_dir, agent_model, file_search_stores = _render_sidebar()
+    api_key, output_dir, agent_model, file_search_stores, mcp_tools = _render_sidebar()
     client = _get_client(api_key)
 
     st.title("📊 Marketia Research Hub")
@@ -124,10 +167,20 @@ def main() -> None:
     tab1, tab2 = st.tabs(["🚀 New Research", "🔍 Follow-up Analysis"])
     with tab1:
         new_research_tab(
-            client, output_dir, agent=agent_model, file_search_stores=file_search_stores
+            client,
+            output_dir,
+            agent=agent_model,
+            file_search_stores=file_search_stores,
+            extra_tools=mcp_tools,
         )
     with tab2:
-        followup_tab(client, output_dir, agent=agent_model, file_search_stores=file_search_stores)
+        followup_tab(
+            client,
+            output_dir,
+            agent=agent_model,
+            file_search_stores=file_search_stores,
+            extra_tools=mcp_tools,
+        )
 
 
 main()
