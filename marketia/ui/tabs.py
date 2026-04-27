@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +13,14 @@ import streamlit as st
 from marketia.core import (
     FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
+    ImageOut,
     PlanSession,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
+    extract_report_outputs,
     extract_report_text,
+    file_to_attachment,
     run_followup,
     run_research,
     run_research_streaming,
@@ -66,10 +71,11 @@ def _stream_research(
     *,
     extra_agent_config: dict | None = None,
     previous_interaction_id: str = "",
-) -> tuple[str, Any]:
-    """Run streaming research, returning ``(full_text, interaction)``.
+    attachments: list[dict] | None = None,
+) -> tuple[str, list[ImageOut], Any]:
+    """Run streaming research, returning ``(full_text, images, interaction)``.
 
-    Falls back to poll mode on streaming errors. Returns ``("", None)`` on failure
+    Falls back to poll mode on streaming errors. Returns ``("", [], None)`` on failure
     (caller must check and surface the error).
     """
     thoughts_expander = st.expander("Thoughts (live)", expanded=False)
@@ -77,6 +83,7 @@ def _stream_research(
     text_placeholder = st.empty()
     thoughts: list[str] = []
     full_text = ""
+    images: list[ImageOut] = []
     interaction = None
 
     try:
@@ -87,6 +94,7 @@ def _stream_research(
             agent=agent,
             agent_config={**stream_cfg, "thinking_summaries": "auto"} if stream_cfg else None,
             previous_interaction_id=previous_interaction_id,
+            attachments=attachments,
         ):
             if event_type == "content.delta":
                 if delta_type == "text":
@@ -94,16 +102,16 @@ def _stream_research(
                     text_placeholder.markdown(full_text)
                 elif delta_type == "thought_summary" and payload:
                     thoughts.append(payload)
-                    thoughts_placeholder.markdown(
-                        "\n\n".join(f"_{t}_" for t in thoughts[-3:])
-                    )
+                    thoughts_placeholder.markdown("\n\n".join(f"_{t}_" for t in thoughts[-3:]))
+                elif delta_type == "image" and payload:
+                    images.append(ImageOut(data=payload, mime_type="image/png"))
             elif event_type == "interaction.status_update":
                 logger.debug("status_update: %s", payload)
             elif event_type == "interaction.complete":
                 interaction = payload
             elif event_type == "error":
                 st.error(f"Stream error: {payload}")
-                return "", None
+                return "", [], None
     except Exception as exc:
         logger.warning("Streaming failed (%s); falling back to poll mode", exc)
         status_box = st.status("Research in progress (poll mode)...", expanded=True)
@@ -114,15 +122,16 @@ def _stream_research(
                 agent=agent,
                 extra_agent_config=extra_agent_config,
                 previous_interaction_id=previous_interaction_id,
+                attachments=attachments,
                 on_status=_make_status_writer(status_box),
             )
         except (ResearchFailedError, ResearchTimeoutError) as exc2:
             st.error(str(exc2))
-            return "", None
-        full_text = extract_report_text(interaction)
+            return "", [], None
+        full_text, images = extract_report_outputs(interaction)
 
     text_placeholder.empty()
-    return full_text, interaction
+    return full_text, images, interaction
 
 
 def _save_and_display(
@@ -134,6 +143,8 @@ def _save_and_display(
     agent: str,
     output_dir: str,
     plan_rounds: int = 0,
+    attachment_names: list[str] | None = None,
+    images: list[ImageOut] | None = None,
 ) -> None:
     """Render metrics, the report body, and save the file."""
     usage = Usage.from_interaction(interaction)
@@ -142,6 +153,8 @@ def _save_and_display(
     _render_usage_metrics(usage)
     st.success("Research Report Generated")
     st.markdown(full_report)
+    for img in images or []:
+        st.image(img.data, use_container_width=True)
 
     if report_title.strip():
         final_title, final_tags = report_title.strip(), []
@@ -167,6 +180,8 @@ def _save_and_display(
             interaction_id=getattr(interaction, "id", ""),
             agent=agent,
             plan_rounds=plan_rounds,
+            attachments=attachment_names or [],
+            images=images or [],
             output_dir=output_dir,
         )
     except (OSError, NotADirectoryError) as exc:
@@ -205,7 +220,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
 
         if col_refine.button("Refine Plan", disabled=not refinement):
             with st.spinner("Refining plan..."):
-                plan_text, interaction = _stream_research(
+                plan_text, _, interaction = _stream_research(
                     client,
                     refinement,
                     agent,
@@ -223,7 +238,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
 
         if col_approve.button("Approve & Run", type="primary"):
             with st.spinner("Approving plan and starting full research…"):
-                full_report, interaction = _stream_research(
+                full_report, images, interaction = _stream_research(
                     client,
                     "Approved. Please proceed with the full research.",
                     agent,
@@ -239,8 +254,15 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
                 st.warning("Task completed but returned no text output.")
                 return
             _save_and_display(
-                client, full_report, interaction, prompt, "", agent, output_dir,
+                client,
+                full_report,
+                interaction,
+                prompt,
+                "",
+                agent,
+                output_dir,
                 plan_rounds=plan_rounds,
+                images=images or None,
             )
         return
 
@@ -266,6 +288,13 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
             research_prompt = uploaded.read().decode("utf-8")
             st.success(f"Loaded: {uploaded.name}")
 
+    attached_files = st.file_uploader(
+        "Attach files (optional)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        help="Images are inlined as base64. PDFs are sent as document parts.",
+    )
+
     review_plan = st.checkbox(
         "Review plan first (collaborative planning)",
         value=False,
@@ -282,13 +311,27 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         st.error("Please enter a prompt.")
         return
 
+    # Build attachment parts from uploaded files.
+    attachments: list[dict] = []
+    for f in attached_files or []:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=Path(f.name).suffix, delete=False) as tmp:
+                tmp.write(f.read())
+                tmp_path = Path(tmp.name)
+            attachments.append(file_to_attachment(tmp_path))
+            os.unlink(tmp_path)
+        except ValueError as exc:
+            st.error(f"{f.name}: {exc}")
+            return
+
     if review_plan:
         with st.spinner("Generating research plan…"):
-            plan_text, interaction = _stream_research(
+            plan_text, _, interaction = _stream_research(
                 client,
                 research_prompt,
                 agent,
                 extra_agent_config={"collaborative_planning": True},
+                attachments=attachments or None,
             )
         if interaction is None:
             return
@@ -302,14 +345,25 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         st.rerun()
         return
 
-    full_report, interaction = _stream_research(client, research_prompt, agent)
+    full_report, images, interaction = _stream_research(
+        client, research_prompt, agent, attachments=attachments or None
+    )
     if interaction is None:
         return
     if not full_report:
         st.warning("Task completed but returned no text output.")
         return
+    attachment_names = [f.name for f in (attached_files or [])]
     _save_and_display(
-        client, full_report, interaction, research_prompt, report_title, agent, output_dir
+        client,
+        full_report,
+        interaction,
+        research_prompt,
+        report_title,
+        agent,
+        output_dir,
+        attachment_names=attachment_names,
+        images=images or None,
     )
 
 
@@ -360,9 +414,7 @@ def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST)
 
     use_sync = bool(parent_interaction_id) and not force_deep
     if use_sync:
-        st.info(
-            f"**Sync** · Uses `previous_interaction_id` via `{FOLLOWUP_MODEL}` · ~$0.01–0.05"
-        )
+        st.info(f"**Sync** · Uses `previous_interaction_id` via `{FOLLOWUP_MODEL}` · ~$0.01–0.05")
     else:
         reason = (
             "no interaction ID in this report" if not parent_interaction_id else "deep mode forced"

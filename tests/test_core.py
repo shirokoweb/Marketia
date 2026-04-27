@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import types
 import warnings
@@ -14,11 +15,16 @@ from marketia.core import (
     FOLLOWUP_MODEL,
     RESEARCH_MODEL_FAST,
     RESEARCH_MODEL_MAX,
+    ImageOut,
     PlanSession,
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
+    build_input,
     calculate_cost,
+    extract_report_outputs,
+    extract_report_text,
+    file_to_attachment,
     run_followup,
     run_research,
     run_research_streaming,
@@ -281,9 +287,7 @@ def test_run_followup_calls_create_with_correct_args():
         captured.update(kwargs)
         return _FI()
 
-    client = types.SimpleNamespace(
-        interactions=types.SimpleNamespace(create=fake_create)
-    )
+    client = types.SimpleNamespace(interactions=types.SimpleNamespace(create=fake_create))
     result = run_followup(client, "What next?", "parent-id-123")
     assert captured.get("model") == FOLLOWUP_MODEL
     assert captured.get("previous_interaction_id") == "parent-id-123"
@@ -300,9 +304,7 @@ def test_run_followup_accepts_custom_model():
         captured.update(kwargs)
         return types.SimpleNamespace(id="x", outputs=[], usage=None)
 
-    client = types.SimpleNamespace(
-        interactions=types.SimpleNamespace(create=fake_create)
-    )
+    client = types.SimpleNamespace(interactions=types.SimpleNamespace(create=fake_create))
     run_followup(client, "Q", "pid", model="gemini-2.5-pro")
     assert captured["model"] == "gemini-2.5-pro"
 
@@ -480,9 +482,7 @@ def test_streaming_agent_config_includes_thinking_summaries():
         captured.update(kwargs)
         return _FakeStream()
 
-    client = types.SimpleNamespace(
-        interactions=types.SimpleNamespace(create=fake_create)
-    )
+    client = types.SimpleNamespace(interactions=types.SimpleNamespace(create=fake_create))
     list(run_research_streaming(client, "q"))
     cfg = captured.get("agent_config", {})
     assert cfg.get("type") == "deep-research"
@@ -522,9 +522,169 @@ def test_streaming_reconnects_on_disconnect():
 
 
 def test_streaming_status_update_yielded():
-    client = _streaming_client(
-        [_make_start(), _make_status_update("planning"), _make_complete()]
-    )
+    client = _streaming_client([_make_start(), _make_status_update("planning"), _make_complete()])
     evts = list(run_research_streaming(client, "q"))
     status_evts = [(et, dt, p) for et, dt, p in evts if et == "interaction.status_update"]
     assert status_evts == [("interaction.status_update", None, "planning")]
+
+
+# ---------------------------------------------------------------------------
+# build_input + file_to_attachment (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def test_build_input_no_attachments_returns_str():
+    assert build_input("hello") == "hello"
+
+
+def test_build_input_empty_attachments_returns_str():
+    assert build_input("hello", attachments=[]) == "hello"
+
+
+def test_build_input_with_attachments_returns_list():
+    att = {"type": "image", "data": "abc", "mime_type": "image/png"}
+    result = build_input("describe this", attachments=[att])
+    assert isinstance(result, list)
+    assert result[0] == {"type": "text", "text": "describe this"}
+    assert result[1] == att
+
+
+def test_build_input_multiple_attachments():
+    atts = [
+        {"type": "image", "data": "abc", "mime_type": "image/png"},
+        {"type": "document", "data": "xyz", "mime_type": "application/pdf"},
+    ]
+    result = build_input("prompt", attachments=atts)
+    assert len(result) == 3
+    assert result[0]["type"] == "text"
+
+
+def test_file_to_attachment_png(tmp_path):
+    img = tmp_path / "test.png"
+    img.write_bytes(b"\x89PNG fake")
+    att = file_to_attachment(img)
+    assert att["type"] == "image"
+    assert att["mime_type"] == "image/png"
+    assert base64.b64decode(att["data"]) == b"\x89PNG fake"
+
+
+def test_file_to_attachment_jpg(tmp_path):
+    f = tmp_path / "photo.jpg"
+    f.write_bytes(b"JFIF fake")
+    att = file_to_attachment(f)
+    assert att["mime_type"] == "image/jpeg"
+
+
+def test_file_to_attachment_pdf(tmp_path):
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF fake")
+    att = file_to_attachment(f)
+    assert att["type"] == "document"
+    assert att["mime_type"] == "application/pdf"
+
+
+def test_file_to_attachment_oversize_raises(tmp_path):
+    big = tmp_path / "big.png"
+    big.write_bytes(b"x" * (21 * 1024 * 1024))
+    with pytest.raises(ValueError, match="too large"):
+        file_to_attachment(big)
+
+
+def test_file_to_attachment_unsupported_raises(tmp_path):
+    f = tmp_path / "data.csv"
+    f.write_bytes(b"col1,col2")
+    with pytest.raises(ValueError, match="Unsupported"):
+        file_to_attachment(f)
+
+
+def test_run_research_passes_attachment_input():
+    """When attachments are provided, input passed to create() is a list, not a str."""
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    att = {"type": "image", "data": "abc", "mime_type": "image/png"}
+    run_research(client, "describe", attachments=[att], poll_interval=0)
+    assert isinstance(captured["input"], list)
+    assert captured["input"][0] == {"type": "text", "text": "describe"}
+    assert captured["input"][1] == att
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — extract_report_outputs / ImageOut
+# ---------------------------------------------------------------------------
+
+
+def _make_text_output(text: str):
+    return types.SimpleNamespace(type="text", text=text, data=None)
+
+
+def _make_image_output(b64data: str, mime: str = "image/png"):
+    return types.SimpleNamespace(type="image", text="", data=b64data, mime_type=mime)
+
+
+def _fake_interaction(*outputs):
+    return types.SimpleNamespace(outputs=list(outputs), usage=None, id="i1")
+
+
+def test_extract_report_outputs_text_only():
+    interaction = _fake_interaction(_make_text_output("hello"), _make_text_output(" world"))
+    text, images = extract_report_outputs(interaction)
+    assert text == "hello world"
+    assert images == []
+
+
+def test_extract_report_outputs_image_only():
+    raw = b"\x89PNG\r\n"
+    b64 = base64.b64encode(raw).decode()
+    interaction = _fake_interaction(_make_image_output(b64))
+    text, images = extract_report_outputs(interaction)
+    assert text == ""
+    assert len(images) == 1
+    assert isinstance(images[0], ImageOut)
+    assert images[0].data == raw
+    assert images[0].mime_type == "image/png"
+
+
+def test_extract_report_outputs_interleaved():
+    raw = b"\x89PNG"
+    b64 = base64.b64encode(raw).decode()
+    interaction = _fake_interaction(
+        _make_text_output("before "),
+        _make_image_output(b64),
+        _make_text_output(" after"),
+    )
+    text, images = extract_report_outputs(interaction)
+    assert text == "before  after"
+    assert len(images) == 1
+    assert images[0].data == raw
+
+
+def test_extract_report_outputs_no_outputs():
+    interaction = types.SimpleNamespace(outputs=None, usage=None, id="i1")
+    text, images = extract_report_outputs(interaction)
+    assert text == ""
+    assert images == []
+
+
+def test_extract_report_text_backward_compat():
+    interaction = _fake_interaction(_make_text_output("legacy"), _make_text_output(" compat"))
+    assert extract_report_text(interaction) == "legacy compat"
+
+
+def test_image_out_dataclass():
+    img = ImageOut(data=b"\xff", mime_type="image/jpeg")
+    assert img.data == b"\xff"
+    assert img.mime_type == "image/jpeg"

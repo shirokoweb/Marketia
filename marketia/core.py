@@ -14,6 +14,7 @@ import time
 import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -31,6 +32,14 @@ FLASH_MODEL = "gemini-2.5-flash-lite"
 # base agent_config required by every Deep Research call (type key is mandatory per docs).
 _AGENT_CONFIG_BASE: dict[str, Any] = {"type": "deep-research"}
 
+_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20 MB
+_MIME_BY_EXT: dict[str, tuple[str, str]] = {
+    ".png": ("image", "image/png"),
+    ".jpg": ("image", "image/jpeg"),
+    ".jpeg": ("image", "image/jpeg"),
+    ".pdf": ("document", "application/pdf"),
+}
+
 # Pricing tiers for RESEARCH_MODEL (USD per 1M tokens).
 _INPUT_RATE_LOW, _INPUT_RATE_HIGH = 1.00, 2.00
 _OUTPUT_RATE_LOW, _OUTPUT_RATE_HIGH = 6.00, 9.00
@@ -40,6 +49,37 @@ _TIER_BOUNDARY_TOKENS = 200_000
 _STATUS_COMPLETED = "completed"
 _STATUS_FAILED = "failed"
 _STATUS_IN_PROGRESS = "in_progress"
+
+
+def file_to_attachment(path: Path) -> dict[str, str]:
+    """Read a local file and return an API-ready content-part dict.
+
+    Raises ``ValueError`` for unsupported extensions or files exceeding 20 MB.
+    ``data`` is base64-encoded (str) as the SDK expects.
+    """
+    ext = path.suffix.lower()
+    if ext not in _MIME_BY_EXT:
+        raise ValueError(f"Unsupported attachment type: {ext!r}. Supported: {sorted(_MIME_BY_EXT)}")
+    raw = path.read_bytes()
+    if len(raw) > _MAX_ATTACHMENT_BYTES:
+        raise ValueError(
+            f"Attachment too large: {path.name} "
+            f"({len(raw) / 1_048_576:.1f} MB > {_MAX_ATTACHMENT_BYTES // 1_048_576} MB)"
+        )
+    content_type, mime_type = _MIME_BY_EXT[ext]
+    return {"type": content_type, "data": base64.b64encode(raw).decode(), "mime_type": mime_type}
+
+
+def build_input(prompt: str, attachments: list[dict] | None = None) -> str | list:
+    """Combine a text prompt with optional attachment parts into API input format.
+
+    Returns the plain ``prompt`` string when there are no attachments, or a list
+    of content-part dicts (``[{"type": "text", "text": prompt}, *attachments]``)
+    when attachments are present.
+    """
+    if not attachments:
+        return prompt
+    return [{"type": "text", "text": prompt}, *attachments]
 
 
 def __getattr__(name: str) -> Any:
@@ -196,6 +236,7 @@ def run_research(
     timeout: float = 30 * 60,
     previous_interaction_id: str = "",
     extra_agent_config: dict | None = None,
+    attachments: list[dict] | None = None,
 ) -> Any:
     """Submit a research interaction in background mode and poll to completion.
 
@@ -224,7 +265,7 @@ def run_research(
 
     create_kwargs: dict[str, Any] = {
         "agent": agent,
-        "input": prompt,
+        "input": build_input(prompt, attachments),
         "background": True,
         "agent_config": agent_config,
     }
@@ -289,6 +330,7 @@ def run_research_streaming(
     agent: str = RESEARCH_MODEL_FAST,
     agent_config: dict | None = None,
     previous_interaction_id: str = "",
+    attachments: list[dict] | None = None,
     max_reconnects: int = 3,
 ) -> Iterator[tuple[str, str | None, Any]]:
     """Stream a Deep Research task, yielding ``(event_type, delta_type, payload)`` tuples.
@@ -310,7 +352,7 @@ def run_research_streaming(
 
     create_kwargs: dict[str, Any] = {
         "agent": agent,
-        "input": prompt,
+        "input": build_input(prompt, attachments),
         "stream": True,
         "background": True,
         "agent_config": config,
@@ -377,10 +419,39 @@ def run_research_streaming(
                 raise
 
 
+@dataclass(frozen=True)
+class ImageOut:
+    """A decoded image output from a research interaction."""
+
+    data: bytes
+    mime_type: str
+
+
+def extract_report_outputs(interaction: Any) -> tuple[str, list[ImageOut]]:
+    """Return (full_text, images) from a completed interaction.
+
+    Text outputs are concatenated; image outputs are base64-decoded into ImageOut.
+    """
+    outputs = getattr(interaction, "outputs", None) or []
+    text_parts: list[str] = []
+    images: list[ImageOut] = []
+    for o in outputs:
+        otype = getattr(o, "type", "text")
+        if otype == "image":
+            raw = getattr(o, "data", None)
+            mime = getattr(o, "mime_type", "image/png")
+            if raw:
+                images.append(ImageOut(data=base64.b64decode(raw), mime_type=mime))
+            text_parts.append("")
+        else:
+            text_parts.append(getattr(o, "text", ""))
+    return "".join(text_parts), images
+
+
 def extract_report_text(interaction: Any) -> str:
     """Concatenate all text outputs from a completed interaction.
 
     Returns an empty string if the interaction has no outputs.
     """
-    outputs = getattr(interaction, "outputs", None) or []
-    return "".join(getattr(o, "text", "") for o in outputs)
+    text, _ = extract_report_outputs(interaction)
+    return text

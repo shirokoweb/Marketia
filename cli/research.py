@@ -181,7 +181,10 @@ def main() -> int:
     else:
         try:
             interaction = run_research(
-                client, prompt, agent=agent_model, on_status=_on_status,
+                client,
+                prompt,
+                agent=agent_model,
+                on_status=_on_status,
                 attachments=attachments or None,
             )
         except ResearchFailedError as exc:

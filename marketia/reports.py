@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from marketia.core import FLASH_MODEL
+from marketia.core import FLASH_MODEL, ImageOut
 
 logger = logging.getLogger("marketia")
 
@@ -46,6 +46,7 @@ def generate_frontmatter(
     interaction_id: str = "",
     agent: str = "",
     plan_rounds: int = 0,
+    attachments: list[str] | None = None,
 ) -> str:
     """Render a YAML frontmatter block (including the ``---`` fences)."""
     now = datetime.datetime.now()
@@ -62,6 +63,7 @@ def generate_frontmatter(
         "interaction_id": interaction_id,
         "agent": agent,
         "plan_rounds": plan_rounds,
+        "attachments": attachments or [],
         "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -109,6 +111,42 @@ def _resolve_output_dir(output_dir: str) -> Path:
     return resolved
 
 
+_MIME_TO_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+
+def save_report_assets(slug: str, images: list[ImageOut], assets_dir: Path) -> list[str]:
+    """Write images to ``assets_dir`` and return relative markdown paths.
+
+    Creates the directory if needed. Returns a list of relative paths like
+    ``<slug>_assets/image_01.png`` suitable for embedding in markdown.
+    """
+    if not images:
+        return []
+    assets_dir.mkdir(exist_ok=True)
+    rel_paths: list[str] = []
+    for i, img in enumerate(images, start=1):
+        ext = _MIME_TO_EXT.get(img.mime_type, ".png")
+        filename = f"image_{i:02d}{ext}"
+        (assets_dir / filename).write_bytes(img.data)
+        rel_paths.append(f"{assets_dir.name}/{filename}")
+    logger.info("Saved %d image(s) to %s", len(images), assets_dir)
+    return rel_paths
+
+
+def _inject_image_links(content: str, images: list[ImageOut], slug: str, assets_dir: Path) -> str:
+    """Save images and append markdown links to content."""
+    rel_paths = save_report_assets(slug, images, assets_dir)
+    if not rel_paths:
+        return content
+    links = "\n".join(f"![]({p})" for p in rel_paths)
+    return f"{content}\n\n{links}"
+
+
 def save_research_report(
     content: str,
     title: str,
@@ -120,6 +158,8 @@ def save_research_report(
     interaction_id: str = "",
     agent: str = "",
     plan_rounds: int = 0,
+    attachments: list[str] | None = None,
+    images: list[ImageOut] | None = None,
     output_dir: str = "",
 ) -> Path:
     """Write a new research report with frontmatter and a slug-based filename.
@@ -138,6 +178,11 @@ def save_research_report(
         path = target_dir / f"{slug}_{date_str}-{counter}.md"
         counter += 1
 
+    final_content = content
+    if images:
+        assets_dir = target_dir / f"{slug}_assets"
+        final_content = _inject_image_links(content, images, slug, assets_dir)
+
     frontmatter = generate_frontmatter(
         title=title,
         tags=tags,
@@ -147,8 +192,11 @@ def save_research_report(
         interaction_id=interaction_id,
         agent=agent,
         plan_rounds=plan_rounds,
+        attachments=attachments,
     )
-    path.write_text(f"{frontmatter}# {title}\n\n## Research Report\n\n{content}", encoding="utf-8")
+    path.write_text(
+        f"{frontmatter}# {title}\n\n## Research Report\n\n{final_content}", encoding="utf-8"
+    )
     logger.info("Saved report: %s", path)
     return path
 

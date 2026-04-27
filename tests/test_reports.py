@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from marketia.core import ImageOut
 from marketia.reports import (
     append_followup_to_report,
     generate_frontmatter,
     parse_frontmatter,
+    save_report_assets,
     save_research_report,
     slugify,
     update_frontmatter,
@@ -211,9 +213,7 @@ def test_append_followup_records_mode(tmp_path):
 
 
 def test_save_report_includes_plan_rounds(tmp_path):
-    path = save_research_report(
-        content="body", title="T", output_dir=str(tmp_path), plan_rounds=3
-    )
+    path = save_research_report(content="body", title="T", output_dir=str(tmp_path), plan_rounds=3)
     fm, _ = parse_frontmatter(path.read_text())
     assert fm.get("plan_rounds") == 3
 
@@ -226,7 +226,9 @@ def test_save_report_plan_rounds_defaults_zero(tmp_path):
 
 def test_save_report_includes_attachments(tmp_path):
     path = save_research_report(
-        content="body", title="T", output_dir=str(tmp_path),
+        content="body",
+        title="T",
+        output_dir=str(tmp_path),
         attachments=["report.pdf", "chart.png"],
     )
     fm, _ = parse_frontmatter(path.read_text())
@@ -237,3 +239,32 @@ def test_save_report_attachments_defaults_empty(tmp_path):
     path = save_research_report(content="body", title="T", output_dir=str(tmp_path))
     fm, _ = parse_frontmatter(path.read_text())
     assert fm.get("attachments", []) == []
+
+
+def test_save_report_assets_writes_images(tmp_path):
+    assets_dir = tmp_path / "report_assets"
+    raw = b"\x89PNG\r\n\x1a\n"
+    imgs = [ImageOut(data=raw, mime_type="image/png")]
+    paths = save_report_assets("report", imgs, assets_dir)
+    assert len(paths) == 1
+    assert paths[0] == "report_assets/image_01.png"
+    assert (assets_dir / "image_01.png").read_bytes() == raw
+
+
+def test_save_report_assets_empty(tmp_path):
+    assets_dir = tmp_path / "report_assets"
+    paths = save_report_assets("report", [], assets_dir)
+    assert paths == []
+    assert not assets_dir.exists()
+
+
+def test_save_research_report_injects_image_links(tmp_path):
+    raw = b"\x89PNG\r\n"
+    imgs = [ImageOut(data=raw, mime_type="image/png")]
+    path = save_research_report(
+        content="body text", title="My Report", output_dir=str(tmp_path), images=imgs
+    )
+    content = path.read_text()
+    assert "![](my-report_assets/image_01.png)" in content
+    assets_file = tmp_path / "my-report_assets" / "image_01.png"
+    assert assets_file.read_bytes() == raw
