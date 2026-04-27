@@ -140,11 +140,12 @@ def _get_client(api_key: str):
         return cached[1]
     try:
         client = load_client(api_key)
+        st.session_state["_client_for_key"] = (api_key, client)
+        return client
     except MissingAPIKeyError as exc:
         st.error(str(exc))
         st.stop()
-    st.session_state["_client_for_key"] = (api_key, client)
-    return client
+        return None
 
 
 def main() -> None:

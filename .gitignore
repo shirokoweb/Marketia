@@ -39,6 +39,8 @@ Thumbs.db
 # Project-local
 .claude/
 backups/
+CLAUDE.md
+tasks/
 
 # Dev artifacts (never commit)
 debug_interaction.txt
