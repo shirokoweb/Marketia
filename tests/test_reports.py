@@ -268,3 +268,18 @@ def test_save_research_report_injects_image_links(tmp_path):
     assert "![](my-report_assets/image_01.png)" in content
     assets_file = tmp_path / "my-report_assets" / "image_01.png"
     assert assets_file.read_bytes() == raw
+
+
+def test_save_report_records_file_search_stores(tmp_path):
+    stores = ["fileSearchStores/my-corpus"]
+    path = save_research_report(
+        content="body", title="T", output_dir=str(tmp_path), file_search_stores=stores
+    )
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("file_search_stores") == stores
+
+
+def test_save_report_file_search_stores_defaults_empty(tmp_path):
+    path = save_research_report(content="body", title="T", output_dir=str(tmp_path))
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("file_search_stores", []) == []

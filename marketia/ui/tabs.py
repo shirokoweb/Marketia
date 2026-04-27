@@ -32,6 +32,7 @@ from marketia.reports import (
     parse_frontmatter,
     save_research_report,
 )
+from marketia.settings import build_file_search_tool
 
 logger = logging.getLogger("marketia")
 
@@ -72,6 +73,7 @@ def _stream_research(
     extra_agent_config: dict | None = None,
     previous_interaction_id: str = "",
     attachments: list[dict] | None = None,
+    tools: list[dict] | None = None,
 ) -> tuple[str, list[ImageOut], Any]:
     """Run streaming research, returning ``(full_text, images, interaction)``.
 
@@ -95,6 +97,7 @@ def _stream_research(
             agent_config={**stream_cfg, "thinking_summaries": "auto"} if stream_cfg else None,
             previous_interaction_id=previous_interaction_id,
             attachments=attachments,
+            tools=tools,
         ):
             if event_type == "content.delta":
                 if delta_type == "text":
@@ -123,6 +126,7 @@ def _stream_research(
                 extra_agent_config=extra_agent_config,
                 previous_interaction_id=previous_interaction_id,
                 attachments=attachments,
+                tools=tools,
                 on_status=_make_status_writer(status_box),
             )
         except (ResearchFailedError, ResearchTimeoutError) as exc2:
@@ -145,6 +149,7 @@ def _save_and_display(
     plan_rounds: int = 0,
     attachment_names: list[str] | None = None,
     images: list[ImageOut] | None = None,
+    file_search_stores: list[str] | None = None,
 ) -> None:
     """Render metrics, the report body, and save the file."""
     usage = Usage.from_interaction(interaction)
@@ -182,6 +187,7 @@ def _save_and_display(
             plan_rounds=plan_rounds,
             attachments=attachment_names or [],
             images=images or [],
+            file_search_stores=file_search_stores or [],
             output_dir=output_dir,
         )
     except (OSError, NotADirectoryError) as exc:
@@ -197,7 +203,12 @@ def _save_and_display(
     )
 
 
-def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
+def new_research_tab(
+    client: Any,
+    output_dir: str,
+    agent: str = RESEARCH_MODEL_FAST,
+    file_search_stores: list[str] | None = None,
+) -> None:
     """Render the 'New Research' tab."""
     st.subheader("Launch New Deep Research Task")
 
@@ -237,6 +248,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
             st.rerun()
 
         if col_approve.button("Approve & Run", type="primary"):
+            _tools = [build_file_search_tool(file_search_stores)] if file_search_stores else None
             with st.spinner("Approving plan and starting full research…"):
                 full_report, images, interaction = _stream_research(
                     client,
@@ -244,6 +256,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
                     agent,
                     extra_agent_config={"collaborative_planning": False},
                     previous_interaction_id=plan_session.interaction_id,
+                    tools=_tools,
                 )
             if interaction is None:
                 return
@@ -263,6 +276,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
                 output_dir,
                 plan_rounds=plan_rounds,
                 images=images or None,
+                file_search_stores=file_search_stores or [],
             )
         return
 
@@ -324,6 +338,8 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
             st.error(f"{f.name}: {exc}")
             return
 
+    _tools = [build_file_search_tool(file_search_stores)] if file_search_stores else None
+
     if review_plan:
         with st.spinner("Generating research plan…"):
             plan_text, _, interaction = _stream_research(
@@ -332,6 +348,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
                 agent,
                 extra_agent_config={"collaborative_planning": True},
                 attachments=attachments or None,
+                tools=_tools,
             )
         if interaction is None:
             return
@@ -346,7 +363,7 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         return
 
     full_report, images, interaction = _stream_research(
-        client, research_prompt, agent, attachments=attachments or None
+        client, research_prompt, agent, attachments=attachments or None, tools=_tools
     )
     if interaction is None:
         return
@@ -364,10 +381,16 @@ def new_research_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_F
         output_dir,
         attachment_names=attachment_names,
         images=images or None,
+        file_search_stores=file_search_stores or [],
     )
 
 
-def followup_tab(client: Any, output_dir: str, agent: str = RESEARCH_MODEL_FAST) -> None:
+def followup_tab(
+    client: Any,
+    output_dir: str,
+    agent: str = RESEARCH_MODEL_FAST,
+    file_search_stores: list[str] | None = None,
+) -> None:
     """Render the 'Follow-up Analysis' tab."""
     st.subheader("Continue Research (Follow-up)")
 

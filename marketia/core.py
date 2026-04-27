@@ -237,6 +237,7 @@ def run_research(
     previous_interaction_id: str = "",
     extra_agent_config: dict | None = None,
     attachments: list[dict] | None = None,
+    tools: list[dict] | None = None,
 ) -> Any:
     """Submit a research interaction in background mode and poll to completion.
 
@@ -271,6 +272,8 @@ def run_research(
     }
     if previous_interaction_id:
         create_kwargs["previous_interaction_id"] = previous_interaction_id
+    if tools:
+        create_kwargs["tools"] = tools
 
     interaction = client.interactions.create(**create_kwargs)
     logger.info("Research interaction started: id=%s agent=%s", interaction.id, agent)
@@ -331,6 +334,7 @@ def run_research_streaming(
     agent_config: dict | None = None,
     previous_interaction_id: str = "",
     attachments: list[dict] | None = None,
+    tools: list[dict] | None = None,
     max_reconnects: int = 3,
 ) -> Iterator[tuple[str, str | None, Any]]:
     """Stream a Deep Research task, yielding ``(event_type, delta_type, payload)`` tuples.
@@ -359,6 +363,8 @@ def run_research_streaming(
     }
     if previous_interaction_id:
         create_kwargs["previous_interaction_id"] = previous_interaction_id
+    if tools:
+        create_kwargs["tools"] = tools
 
     stream = client.interactions.create(**create_kwargs)
 

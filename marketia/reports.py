@@ -47,6 +47,7 @@ def generate_frontmatter(
     agent: str = "",
     plan_rounds: int = 0,
     attachments: list[str] | None = None,
+    file_search_stores: list[str] | None = None,
 ) -> str:
     """Render a YAML frontmatter block (including the ``---`` fences)."""
     now = datetime.datetime.now()
@@ -64,6 +65,7 @@ def generate_frontmatter(
         "agent": agent,
         "plan_rounds": plan_rounds,
         "attachments": attachments or [],
+        "file_search_stores": file_search_stores or [],
         "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -160,6 +162,7 @@ def save_research_report(
     plan_rounds: int = 0,
     attachments: list[str] | None = None,
     images: list[ImageOut] | None = None,
+    file_search_stores: list[str] | None = None,
     output_dir: str = "",
 ) -> Path:
     """Write a new research report with frontmatter and a slug-based filename.
@@ -193,6 +196,7 @@ def save_research_report(
         agent=agent,
         plan_rounds=plan_rounds,
         attachments=attachments,
+        file_search_stores=file_search_stores,
     )
     path.write_text(
         f"{frontmatter}# {title}\n\n## Research Report\n\n{final_content}", encoding="utf-8"

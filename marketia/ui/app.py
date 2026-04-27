@@ -16,12 +16,13 @@ from marketia.core import (
     configure_logging,
     load_client,
 )
+from marketia.settings import get_file_search_stores, set_file_search_stores
 from marketia.ui.styles import CUSTOM_CSS
 from marketia.ui.tabs import followup_tab, new_research_tab
 
 
-def _render_sidebar() -> tuple[str, str, str]:
-    """Render the sidebar and return ``(api_key, output_dir, agent_model)``."""
+def _render_sidebar() -> tuple[str, str, str, list[str]]:
+    """Render the sidebar and return ``(api_key, output_dir, agent_model, file_search_stores)``."""
     with st.sidebar:
         st.header("Settings")
         env_key = os.getenv("GOOGLE_API_KEY", "")
@@ -66,8 +67,27 @@ def _render_sidebar() -> tuple[str, str, str]:
                 output_dir = str(resolved)
                 st.caption(f"📁 Saving to: `{output_dir}`")
 
+        st.divider()
+        with st.expander("Private Data (file_search)"):
+            st.caption(
+                "Add Gemini file-search store names to query your private corpus. "
+                "Stores are created out-of-band via the Gemini API."
+            )
+            saved_stores = get_file_search_stores()
+            stores_text = st.text_area(
+                "Store names (one per line)",
+                value="\n".join(saved_stores),
+                placeholder="fileSearchStores/my-corpus",
+                key="file_search_stores_input",
+            )
+            if st.button("Save stores", key="save_stores"):
+                parsed = [s.strip() for s in stores_text.splitlines() if s.strip()]
+                set_file_search_stores(parsed)
+                st.success(f"Saved {len(parsed)} store(s).")
+            file_search_stores = [s.strip() for s in stores_text.splitlines() if s.strip()]
+
         st.info("Status: Ready")
-        return api_key, output_dir, agent_model
+        return api_key, output_dir, agent_model, file_search_stores
 
 
 def _get_client(api_key: str):
@@ -96,16 +116,18 @@ def main() -> None:
     )
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    api_key, output_dir, agent_model = _render_sidebar()
+    api_key, output_dir, agent_model, file_search_stores = _render_sidebar()
     client = _get_client(api_key)
 
     st.title("📊 Marketia Research Hub")
 
     tab1, tab2 = st.tabs(["🚀 New Research", "🔍 Follow-up Analysis"])
     with tab1:
-        new_research_tab(client, output_dir, agent=agent_model)
+        new_research_tab(
+            client, output_dir, agent=agent_model, file_search_stores=file_search_stores
+        )
     with tab2:
-        followup_tab(client, output_dir, agent=agent_model)
+        followup_tab(client, output_dir, agent=agent_model, file_search_stores=file_search_stores)
 
 
 main()

@@ -688,3 +688,70 @@ def test_image_out_dataclass():
     img = ImageOut(data=b"\xff", mime_type="image/jpeg")
     assert img.data == b"\xff"
     assert img.mime_type == "image/jpeg"
+
+
+# ---------------------------------------------------------------------------
+# Task 9 — tools (file_search) passthrough in run_research
+# ---------------------------------------------------------------------------
+
+
+def test_run_research_passes_tools_to_create():
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    tools = [{"type": "file_search", "file_search_store_names": ["fileSearchStores/my-store"]}]
+    run_research(client, "p", tools=tools, poll_interval=0)
+    assert captured.get("tools") == tools
+
+
+def test_run_research_omits_tools_when_none():
+    captured = {}
+
+    class _FI:
+        id = "fake"
+        status = "completed"
+        outputs = []
+        usage = None
+        error = None
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FI()
+
+    client = types.SimpleNamespace(
+        interactions=types.SimpleNamespace(create=fake_create, get=lambda id: _FI())
+    )
+    run_research(client, "p", poll_interval=0)
+    assert "tools" not in captured
+
+
+def test_run_research_streaming_passes_tools():
+    tools = [{"type": "file_search", "file_search_store_names": ["fileSearchStores/s"]}]
+    captured = {}
+
+    complete_event = types.SimpleNamespace(
+        event_type="interaction.complete",
+        event_id=None,
+        interaction=types.SimpleNamespace(id="ix", outputs=[], usage=None),
+    )
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return iter([complete_event])
+
+    client = types.SimpleNamespace(interactions=types.SimpleNamespace(create=fake_create))
+    list(run_research_streaming(client, "p", tools=tools))
+    assert captured.get("tools") == tools
