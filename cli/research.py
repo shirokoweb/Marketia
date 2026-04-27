@@ -24,6 +24,7 @@ from marketia.core import (
     Usage,
     configure_logging,
     extract_report_text,
+    file_to_attachment,
     load_client,
     run_research,
     run_research_streaming,
@@ -76,6 +77,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--attach",
+        type=Path,
+        action="append",
+        dest="attachments",
+        metavar="PATH",
+        help="Attach a file (.pdf, .png, .jpg). Repeatable.",
+    )
+    parser.add_argument(
         "--live",
         action="store_true",
         help="Stream thought summaries to stderr as they arrive (uses streaming API).",
@@ -102,7 +111,9 @@ def _on_status(phase: str, elapsed: float) -> None:
     print(f"\r[{int(elapsed):4d}s] status={phase}", end="", flush=True)
 
 
-def _run_streaming(client: object, prompt: str, agent: str) -> tuple[str, object | None]:
+def _run_streaming(
+    client: object, prompt: str, agent: str, attachments: list[dict] | None = None
+) -> tuple[str, object | None]:
     """Run research via streaming, printing thought summaries to stderr.
 
     Returns ``(report_text, interaction)`` or ``("", None)`` on error.
@@ -110,7 +121,9 @@ def _run_streaming(client: object, prompt: str, agent: str) -> tuple[str, object
     text_parts: list[str] = []
     interaction = None
     try:
-        for event_type, delta_type, payload in run_research_streaming(client, prompt, agent=agent):
+        for event_type, delta_type, payload in run_research_streaming(
+            client, prompt, agent=agent, attachments=attachments
+        ):
             if event_type == "content.delta":
                 if delta_type == "text":
                     text_parts.append(payload)
@@ -151,13 +164,26 @@ def main() -> int:
     print(f"Starting research for: {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
     print(f"Mode: {args.mode} ({agent_model})")
 
+    attachments: list[dict] = []
+    for path in args.attachments or []:
+        try:
+            attachments.append(file_to_attachment(path))
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+
     if args.live:
-        report_text, interaction = _run_streaming(client, prompt, agent_model)
+        report_text, interaction = _run_streaming(
+            client, prompt, agent_model, attachments=attachments or None
+        )
         if interaction is None:
             return 1
     else:
         try:
-            interaction = run_research(client, prompt, agent=agent_model, on_status=_on_status)
+            interaction = run_research(
+                client, prompt, agent=agent_model, on_status=_on_status,
+                attachments=attachments or None,
+            )
         except ResearchFailedError as exc:
             print(f"\n{exc}", file=sys.stderr)
             return 1
@@ -187,6 +213,7 @@ def main() -> int:
     total_tokens = usage.total_tokens if usage else 0
     total_cost = usage.cost_usd if usage else 0.0
 
+    attachment_names = [p.name for p in (args.attachments or [])]
     try:
         saved_path = save_research_report(
             content=report_text,
@@ -197,6 +224,7 @@ def main() -> int:
             estimated_cost=total_cost,
             interaction_id=getattr(interaction, "id", ""),
             agent=agent_model,
+            attachments=attachment_names or [],
             output_dir=args.output_dir,
         )
     except (OSError, NotADirectoryError) as exc:

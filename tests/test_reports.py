@@ -222,3 +222,18 @@ def test_save_report_plan_rounds_defaults_zero(tmp_path):
     path = save_research_report(content="body", title="T", output_dir=str(tmp_path))
     fm, _ = parse_frontmatter(path.read_text())
     assert fm.get("plan_rounds", 0) == 0
+
+
+def test_save_report_includes_attachments(tmp_path):
+    path = save_research_report(
+        content="body", title="T", output_dir=str(tmp_path),
+        attachments=["report.pdf", "chart.png"],
+    )
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("attachments") == ["report.pdf", "chart.png"]
+
+
+def test_save_report_attachments_defaults_empty(tmp_path):
+    path = save_research_report(content="body", title="T", output_dir=str(tmp_path))
+    fm, _ = parse_frontmatter(path.read_text())
+    assert fm.get("attachments", []) == []
