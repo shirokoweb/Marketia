@@ -165,12 +165,27 @@ def configure_logging(level: int = logging.INFO) -> None:
     logger.setLevel(level)
 
 
-def calculate_cost(input_tokens: int, output_tokens: int) -> float:
-    """Return the estimated USD cost for a single research interaction.
+# Per-task cost ranges per https://ai.google.dev/gemini-api/docs/deep-research (2026-04-21).
+# Subject to change; used for display estimates only, not billing.
+_COST_RANGES: dict[str, tuple[float, float]] = {
+    RESEARCH_MODEL_FAST: (1.0, 3.0),
+    RESEARCH_MODEL_MAX: (3.0, 7.0),
+}
 
-    Uses the tiered pricing published for ``deep-research-pro-preview-12-2025``:
-    input tier boundary at 200k tokens. Output cost includes reasoning tokens —
-    callers must fold reasoning into ``output_tokens`` before calling.
+
+def estimate_cost_range(agent: str) -> tuple[float, float]:
+    """Return an (low_usd, high_usd) estimate for a Deep Research task.
+
+    Ranges sourced from https://ai.google.dev/gemini-api/docs/deep-research and are
+    subject to change. For unknown agents, falls back to the Fast range.
+    """
+    return _COST_RANGES.get(agent, _COST_RANGES[RESEARCH_MODEL_FAST])
+
+
+def _token_cost(input_tokens: int, output_tokens: int) -> float:
+    """Compute actual USD cost from token counts using tiered pay-as-you-go rates.
+
+    Used for sync follow-ups (standard Gemini model) where the token cost is well-defined.
     """
     if input_tokens <= _TIER_BOUNDARY_TOKENS:
         input_rate, output_rate = _INPUT_RATE_LOW, _OUTPUT_RATE_LOW
@@ -199,7 +214,7 @@ class Usage:
         output_tokens = int(getattr(usage, "total_output_tokens", 0) or 0)
         reasoning_tokens = int(getattr(usage, "total_reasoning_tokens", 0) or 0)
         total_tokens = input_tokens + output_tokens + reasoning_tokens
-        cost_usd = calculate_cost(input_tokens, output_tokens + reasoning_tokens)
+        cost_usd = _token_cost(input_tokens, output_tokens + reasoning_tokens)
         return cls(
             input_tokens=input_tokens,
             output_tokens=output_tokens,

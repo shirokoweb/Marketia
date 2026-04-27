@@ -18,6 +18,7 @@ from marketia.core import (
     ResearchFailedError,
     ResearchTimeoutError,
     Usage,
+    estimate_cost_range,
     extract_report_outputs,
     extract_report_text,
     file_to_attachment,
@@ -39,15 +40,16 @@ logger = logging.getLogger("marketia")
 _PARENT_PREVIEW_MAX = 800
 
 
-def _render_usage_metrics(usage: Usage | None) -> None:
+def _render_usage_metrics(usage: Usage | None, agent: str = RESEARCH_MODEL_FAST) -> None:
     """Render a 4-column metrics row for a completed interaction."""
     if usage is None:
         return
+    lo, hi = estimate_cost_range(agent)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Input Tokens", f"{usage.input_tokens:,}")
     c2.metric("Output Tokens", f"{usage.output_tokens:,}")
     c3.metric("Reasoning Tokens", f"{usage.reasoning_tokens:,}")
-    c4.metric("Estimated Cost", f"${usage.cost_usd:.4f}")
+    c4.metric("Est. Cost Range", f"${lo:.2f} – ${hi:.2f} (est.)")
 
 
 def _make_status_writer(status: Any) -> Any:
@@ -155,7 +157,7 @@ def _save_and_display(
     usage = Usage.from_interaction(interaction)
     logger.debug("usage=%s", usage)
     st.divider()
-    _render_usage_metrics(usage)
+    _render_usage_metrics(usage, agent=agent)
     st.success("Research Report Generated")
     st.markdown(full_report)
     for img in images or []:
@@ -172,7 +174,8 @@ def _save_and_display(
             )
 
     total_tokens = usage.total_tokens if usage else 0
-    total_cost = usage.cost_usd if usage else 0.0
+    lo, hi = estimate_cost_range(agent)
+    cost_range_str = f"{lo:.2f}-{hi:.2f}"
 
     try:
         saved_path = save_research_report(
@@ -181,7 +184,7 @@ def _save_and_display(
             tags=final_tags,
             prompt_summary=research_prompt[:200],
             tokens_used=total_tokens,
-            estimated_cost=total_cost,
+            estimated_cost_range=cost_range_str,
             interaction_id=getattr(interaction, "id", ""),
             agent=agent,
             plan_rounds=plan_rounds,
@@ -518,7 +521,7 @@ def followup_tab(
     usage = Usage.from_interaction(interaction)
     logger.debug("usage=%s", usage)
     st.divider()
-    _render_usage_metrics(usage)
+    _render_usage_metrics(usage, agent=agent if followup_mode == "deep" else FOLLOWUP_MODEL)
     st.markdown(followup_out)
 
     total_tokens = usage.total_tokens if usage else 0

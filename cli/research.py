@@ -23,6 +23,7 @@ from marketia.core import (
     ResearchTimeoutError,
     Usage,
     configure_logging,
+    estimate_cost_range,
     extract_report_text,
     file_to_attachment,
     load_client,
@@ -200,10 +201,11 @@ def main() -> int:
         return 1
 
     usage = Usage.from_interaction(interaction)
+    lo, hi = estimate_cost_range(agent_model)
     if usage:
         print(
             f"Metrics: input={usage.input_tokens:,} output={usage.output_tokens:,} "
-            f"reasoning={usage.reasoning_tokens:,} cost=${usage.cost_usd:.4f}"
+            f"reasoning={usage.reasoning_tokens:,} est. cost=${lo:.2f}–${hi:.2f}"
         )
 
     if args.title:
@@ -214,7 +216,7 @@ def main() -> int:
         title, tags = generate_title_and_tags(prompt, report_text, client)
 
     total_tokens = usage.total_tokens if usage else 0
-    total_cost = usage.cost_usd if usage else 0.0
+    cost_range_str = f"{lo:.2f}-{hi:.2f}"
 
     attachment_names = [p.name for p in (args.attachments or [])]
     try:
@@ -224,7 +226,7 @@ def main() -> int:
             tags=tags,
             prompt_summary=prompt[:200],
             tokens_used=total_tokens,
-            estimated_cost=total_cost,
+            estimated_cost_range=cost_range_str,
             interaction_id=getattr(interaction, "id", ""),
             agent=agent_model,
             attachments=attachment_names or [],

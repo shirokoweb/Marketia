@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import logging
 import types
 import warnings
@@ -21,7 +22,7 @@ from marketia.core import (
     ResearchTimeoutError,
     Usage,
     build_input,
-    calculate_cost,
+    estimate_cost_range,
     extract_report_outputs,
     extract_report_text,
     file_to_attachment,
@@ -339,23 +340,26 @@ def test_usage_from_interaction_builds_correctly():
 
 
 # ---------------------------------------------------------------------------
-# calculate_cost (Task 2)
+# estimate_cost_range (Task 11 — replaced calculate_cost)
 # ---------------------------------------------------------------------------
 
 
-def test_calculate_cost_below_threshold():
-    cost = calculate_cost(input_tokens=100_000, output_tokens=50_000)
-    assert cost > 0
+def test_estimate_cost_range_fast_inline():
+    lo, hi = estimate_cost_range(RESEARCH_MODEL_FAST)
+    assert lo > 0
+    assert hi > lo
 
 
-def test_calculate_cost_above_threshold_higher():
-    cost_low = calculate_cost(input_tokens=100_000, output_tokens=50_000)
-    cost_high = calculate_cost(input_tokens=300_000, output_tokens=50_000)
-    assert cost_high > cost_low
+def test_estimate_cost_range_max_inline():
+    lo_fast, hi_fast = estimate_cost_range(RESEARCH_MODEL_FAST)
+    lo_max, hi_max = estimate_cost_range(RESEARCH_MODEL_MAX)
+    assert lo_max > lo_fast
 
 
-def test_calculate_cost_zero_tokens():
-    assert calculate_cost(0, 0) == 0.0
+def test_estimate_cost_range_unknown_nonnegative():
+    lo, hi = estimate_cost_range("unknown-model")
+    assert lo >= 0
+    assert hi >= lo
 
 
 # ---------------------------------------------------------------------------
@@ -755,3 +759,37 @@ def test_run_research_streaming_passes_tools():
     client = types.SimpleNamespace(interactions=types.SimpleNamespace(create=fake_create))
     list(run_research_streaming(client, "p", tools=tools))
     assert captured.get("tools") == tools
+
+
+# ---------------------------------------------------------------------------
+# Task 11 — estimate_cost_range
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_cost_range_fast():
+    lo, hi = estimate_cost_range(RESEARCH_MODEL_FAST)
+    assert lo == pytest.approx(1.0)
+    assert hi == pytest.approx(3.0)
+
+
+def test_estimate_cost_range_max():
+    lo, hi = estimate_cost_range(RESEARCH_MODEL_MAX)
+    assert lo == pytest.approx(3.0)
+    assert hi == pytest.approx(7.0)
+
+
+def test_estimate_cost_range_unknown_falls_back():
+    lo, hi = estimate_cost_range("some-other-model")
+    assert lo >= 0
+    assert hi >= lo
+
+
+def test_calculate_cost_removed():
+    mod = importlib.import_module("marketia.core")
+    assert not hasattr(mod, "calculate_cost"), "calculate_cost must be deleted in Task 11"
+
+
+def test_usage_cost_range_returns_floats():
+    lo, hi = estimate_cost_range(RESEARCH_MODEL_FAST)
+    assert isinstance(lo, float)
+    assert isinstance(hi, float)
