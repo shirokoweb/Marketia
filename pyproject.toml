@@ -76,7 +76,7 @@ ignore = [
 # returns/statements" rules add no value here.
 # core.py: run_research_streaming dispatches on many event/delta types; extracting helpers
 # would obscure the event-handling logic without improving correctness.
-"marketia/core.py" = ["PLR0912"]
+"marketia/core.py" = ["PLR0912", "PLR0915"]
 "marketia/ui/tabs.py" = ["PLR0911", "PLR0912", "PLR0915"]
 "marketia/ui/app.py" = ["PLR0915"]
 "cli/*.py" = ["PLR0911", "PLR0912", "PLR0915"]

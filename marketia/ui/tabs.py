@@ -114,6 +114,14 @@ def _stream_research(
                 logger.debug("status_update: %s", payload)
             elif event_type == "interaction.complete":
                 interaction = payload
+                # Streaming text deltas can lag the final state. If we got an
+                # interaction object with outputs, prefer those as the canonical
+                # text/images so the report isn't truncated.
+                final_text, final_images = extract_report_outputs(interaction)
+                if final_text and len(final_text) > len(full_text):
+                    full_text = final_text
+                if final_images and not images:
+                    images = final_images
             elif event_type == "error":
                 st.error(f"Stream error: {payload}")
                 return "", [], None
@@ -365,6 +373,16 @@ def new_research_tab(
                 tools=_tools,
             )
         if interaction is None:
+            st.error(
+                "Plan generation finished but no interaction was returned. "
+                "Check the terminal for stream errors and retry."
+            )
+            return
+        if not plan_text:
+            st.error(
+                "Plan generation completed but returned no text. "
+                "Try again, or uncheck 'Review plan first' to skip planning."
+            )
             return
         session = PlanSession(research_prompt)
         session.advance(

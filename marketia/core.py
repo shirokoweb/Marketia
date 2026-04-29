@@ -425,7 +425,22 @@ def run_research_streaming(
                     yield ("error", None, str(getattr(chunk, "error", chunk)))
                     return
 
-            return  # stream ended without interaction.complete
+            # Stream ended without interaction.complete. Fetch final state so
+            # callers always get an interaction object instead of silently
+            # failing with None.
+            if interaction_id:
+                try:
+                    final = client.interactions.get(interaction_id)
+                    yield ("interaction.complete", None, final)
+                except Exception as exc:  # noqa: BLE001
+                    yield (
+                        "error",
+                        None,
+                        f"Stream ended without complete event; fetch failed: {exc}",
+                    )
+            else:
+                yield ("error", None, "Stream ended without start or complete event.")
+            return
 
         except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ReadError) as exc:
             if interaction_id and last_event_id and reconnects < max_reconnects:
